@@ -1,8 +1,8 @@
 .{
     .name = .tip,
-    .version = "0.0.0-alpha-1",
+    .version = "0.0.0-alpha-2",
     .fingerprint = 0x4883b84ca584213a, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .flags = .{
             .url = "git+https://github.com/atisans/flags.zig.git#ba3ae7d2434cc6f381356e8028b51b60ab5942d1",
