@@ -59,6 +59,10 @@ fn status_color(status: models.Task.Status) Color {
     };
 }
 
+fn unix_timestamp(io: std.Io) i64 {
+    return std.Io.Timestamp.now(io, .real).toSeconds();
+}
+
 pub const TaskArgs = struct {
     list: bool = false,
     subcommand: ?union(enum) {
@@ -101,33 +105,33 @@ pub const TaskArgs = struct {
 };
 
 /// Dispatches the appropriate task operation based on the parsed CLI arguments.
-pub fn execute_commands(T: TaskArgs) void {
+pub fn execute_commands(io: std.Io, environ: std.process.Environ, T: TaskArgs) void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var dir = storage.open_config_dir(allocator) catch {
+    var dir = storage.open_data_dir(allocator, io, environ) catch {
         std.debug.print("Failed to open config directory\n", .{});
         return;
     };
-    defer dir.close();
+    defer dir.close(io);
 
     if (T.list) {
-        list_task(allocator, dir) catch {};
+        list_task(allocator, io, dir) catch {};
         return;
     }
 
     if (T.subcommand) |subcommand| {
         switch (subcommand) {
-            .add => |add| add_task(allocator, add.name, dir) catch {
+            .add => |add| add_task(allocator, io, add.name, dir) catch {
                 std.debug.print("Failed to add task\n", .{});
                 return;
             },
-            .delete => |del| delete_task(allocator, del.id, dir) catch {
+            .delete => |del| delete_task(allocator, io, del.id, dir) catch {
                 std.debug.print("Failed to delete task with id: {s}\n", .{del.id});
                 return;
             },
-            .show => |s| show_task(allocator, s.id, dir) catch {
+            .show => |s| show_task(allocator, io, s.id, dir) catch {
                 std.debug.print("Failed to show task with id: {s}\n", .{s.id});
                 return;
             },
@@ -138,13 +142,13 @@ pub fn execute_commands(T: TaskArgs) void {
 }
 
 /// Creates a new task with the given title and persists it to storage.
-fn add_task(allocator: std.mem.Allocator, title: []const u8, dir: std.fs.Dir) !void {
+fn add_task(allocator: std.mem.Allocator, io: std.Io, title: []const u8, dir: std.Io.Dir) !void {
     if (title.len == 0) return error.EmptyTitle;
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const existing = storage.load_tasks(arena.allocator(), dir) catch &[_]models.Task{};
+    const existing = storage.load_tasks(arena.allocator(), io, dir) catch &[_]models.Task{};
 
     var tasks: std.ArrayList(models.Task) = .empty;
     defer tasks.deinit(allocator);
@@ -152,33 +156,25 @@ fn add_task(allocator: std.mem.Allocator, title: []const u8, dir: std.fs.Dir) !v
         tasks.append(allocator, task) catch continue;
     }
 
-    const id = try generate.uuid(allocator);
+    const id = try generate.uuid(allocator, io);
     defer allocator.free(id);
     try tasks.append(allocator, .{
         .status = .pending,
         .id = id[0..],
         .title = title[0..],
-        .created_at = std.time.timestamp(),
+        .created_at = unix_timestamp(io),
     });
     std.debug.print("Adding task: {s}\n", .{title});
 
-    try storage.save_tasks(arena.allocator(), dir, tasks.items);
+    try storage.save_tasks(arena.allocator(), io, dir, tasks.items);
 }
 
 /// Loads and prints all tasks from storage.
-fn list_task(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
+fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const tasks = storage.load_tasks(arena.allocator(), dir) catch |err| {
-        switch (err) {
-            error.FileNotFound => {
-                std.debug.print("No tasks\n", .{});
-                return;
-            },
-            else => return,
-        }
-    };
+    const tasks = storage.load_tasks(arena.allocator(), io, dir) catch return;
 
     if (tasks.len == 0) {
         std.debug.print("No tasks\n", .{});
@@ -205,7 +201,7 @@ fn list_task(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
     if (pending.items.len > 0) {
         std.debug.print("{s}Pending{s} ({d})\n", .{ color(.cyan), color(.reset), pending.items.len });
         for (pending.items) |task| {
-            try print_task(task, false);
+            try print_task(io, task, false);
         }
         std.debug.print("\n", .{});
     }
@@ -213,7 +209,7 @@ fn list_task(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
     if (in_progress.items.len > 0) {
         std.debug.print("{s}In Progress{s} ({d})\n", .{ color(.cyan), color(.reset), in_progress.items.len });
         for (in_progress.items) |task| {
-            try print_task(task, false);
+            try print_task(io, task, false);
         }
         std.debug.print("\n", .{});
     }
@@ -221,12 +217,12 @@ fn list_task(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
     if (completed.items.len > 0) {
         std.debug.print("{s}Completed{s} ({d})\n", .{ color(.green), color(.reset), completed.items.len });
         for (completed.items) |task| {
-            try print_task(task, false);
+            try print_task(io, task, false);
         }
     }
 }
 
-fn print_task(task: models.Task, detailed: bool) !void {
+fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
     const c_status = status_color(task.status);
     const c_reset = color(.reset);
     const compact_id = if (task.id.len > 8) task.id[0..8] else task.id;
@@ -251,7 +247,7 @@ fn print_task(task: models.Task, detailed: bool) !void {
         }
 
         if (task.due_date) |due| {
-            const now = std.time.timestamp();
+            const now = unix_timestamp(io);
             if (due < now) {
                 std.debug.print("Due Date:    {d} (overdue)\n", .{due});
             } else {
@@ -293,7 +289,7 @@ fn print_task(task: models.Task, detailed: bool) !void {
         }
 
         if (task.due_date) |due| {
-            const now = std.time.timestamp();
+            const now = unix_timestamp(io);
             if (due < now) {
                 std.debug.print("      {s}📅 Due: {d} (overdue){s}\n", .{ color(.red), due, c_reset });
             } else {
@@ -313,20 +309,20 @@ fn print_task(task: models.Task, detailed: bool) !void {
 
 /// Marks the task matching `task_id` as completed. Returns `error.InvalidItem`
 /// if no task with that id exists.
-fn mark_complete(allocator: std.mem.Allocator, task_id: []const u8, dir: std.fs.Dir) !void {
+fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit(); // frees everything at once
 
-    const tasks = storage.load_tasks(arena.allocator(), dir) catch {
-        return;
+    const tasks = storage.load_tasks(arena.allocator(), io, dir) catch {
+        return error.InvalidItem;
     };
 
     for (tasks) |*task| {
         if (std.mem.eql(u8, task.id, task_id)) {
             task.status = .completed;
-            task.updated_at = std.time.timestamp();
-            task.completed_at = std.time.timestamp();
-            try storage.save_tasks(arena.allocator(), dir, tasks);
+            task.updated_at = unix_timestamp(io);
+            task.completed_at = unix_timestamp(io);
+            try storage.save_tasks(arena.allocator(), io, dir, tasks);
             return;
         }
     }
@@ -337,14 +333,14 @@ fn mark_complete(allocator: std.mem.Allocator, task_id: []const u8, dir: std.fs.
 
 /// Removes the task matching `task_id` from storage. Returns `error.InvalidItem`
 /// if no task with that id exists. Supports partial ID matching (min 4 chars).
-fn delete_task(allocator: std.mem.Allocator, task_id: []const u8, dir: std.fs.Dir) !void {
+fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     const arena_alloc = arena.allocator();
 
-    const tasks = storage.load_tasks(arena_alloc, dir) catch {
-        return;
+    const tasks = storage.load_tasks(arena_alloc, io, dir) catch {
+        return error.InvalidItem;
     };
 
     var remaining: std.ArrayList(models.Task) = .empty;
@@ -381,19 +377,19 @@ fn delete_task(allocator: std.mem.Allocator, task_id: []const u8, dir: std.fs.Di
         return error.AmbiguousMatch;
     }
 
-    try storage.save_tasks(arena_alloc, dir, remaining.items);
+    try storage.save_tasks(arena_alloc, io, dir, remaining.items);
     std.debug.print("Task deleted: {s}\n", .{tasks[found_indices.items[0]].title});
 }
 
 /// Displays full details of a task by ID. Supports partial ID matching (min 4 chars).
-fn show_task(allocator: std.mem.Allocator, task_id: []const u8, dir: std.fs.Dir) !void {
+fn show_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     const arena_alloc = arena.allocator();
 
-    const tasks = storage.load_tasks(arena_alloc, dir) catch {
-        return;
+    const tasks = storage.load_tasks(arena_alloc, io, dir) catch {
+        return error.InvalidItem;
     };
 
     var found_indices: std.ArrayList(usize) = .empty;
@@ -426,21 +422,22 @@ fn show_task(allocator: std.mem.Allocator, task_id: []const u8, dir: std.fs.Dir)
     }
 
     const task = tasks[found_indices.items[0]];
-    try print_task(task, true);
+    try print_task(io, task, true);
 }
 
 test "add and list tasks" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try add_task(allocator, "Test Task", tmp_dir.dir);
+    try add_task(allocator, io, "Test Task", tmp_dir.dir);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const tasks = try storage.load_tasks(arena.allocator(), tmp_dir.dir);
+    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
     try std.testing.expectEqual(tasks.len, 1);
     try std.testing.expectEqualStrings(tasks[0].title, "Test Task");
     try std.testing.expectEqual(tasks[0].status, .pending);
@@ -450,64 +447,68 @@ test "add and list tasks" {
 
 test "delete task" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try add_task(allocator, "To Delete", tmp_dir.dir);
+    try add_task(allocator, io, "To Delete", tmp_dir.dir);
 
     const task_id = blk: {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
-        const tasks = try storage.load_tasks(arena.allocator(), tmp_dir.dir);
+        const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
         try std.testing.expectEqual(tasks.len, 1);
         break :blk try allocator.dupe(u8, tasks[0].id);
     };
     defer allocator.free(task_id);
 
-    try delete_task(allocator, task_id, tmp_dir.dir);
+    try delete_task(allocator, io, task_id, tmp_dir.dir);
 
     {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
-        const tasks = try storage.load_tasks(arena.allocator(), tmp_dir.dir);
+        const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
         try std.testing.expectEqual(tasks.len, 0);
     }
 }
 
 test "delete nonexistent task returns error" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try std.testing.expectError(error.InvalidItem, delete_task(allocator, "999", tmp_dir.dir));
+    try std.testing.expectError(error.InvalidItem, delete_task(allocator, io, "999", tmp_dir.dir));
 }
 
 test "list task with no file" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
     // Should not error — just prints "No tasks"
-    try list_task(allocator, tmp_dir.dir);
+    try list_task(allocator, io, tmp_dir.dir);
 }
 
 test "mark_complete sets status and timestamps" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try add_task(allocator, "Complete Me", tmp_dir.dir);
+    try add_task(allocator, io, "Complete Me", tmp_dir.dir);
 
-    const tasks = try storage.load_tasks(arena.allocator(), tmp_dir.dir);
-    try mark_complete(allocator, tasks[0].id, tmp_dir.dir);
+    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
+    try mark_complete(allocator, io, tasks[0].id, tmp_dir.dir);
 
-    const updated = try storage.load_tasks(arena.allocator(), tmp_dir.dir);
+    const updated = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
     try std.testing.expectEqual(updated[0].status, .completed);
     try std.testing.expect(updated[0].updated_at != null);
     try std.testing.expect(updated[0].completed_at != null);
@@ -515,37 +516,40 @@ test "mark_complete sets status and timestamps" {
 
 test "mark_complete nonexistent task returns error" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try add_task(allocator, "Some Task", tmp_dir.dir);
+    try add_task(allocator, io, "Some Task", tmp_dir.dir);
 
-    try std.testing.expectError(error.InvalidItem, mark_complete(allocator, "nonexistent-id", tmp_dir.dir));
+    try std.testing.expectError(error.InvalidItem, mark_complete(allocator, io, "nonexistent-id", tmp_dir.dir));
 }
 
 test "add empty task name returns error" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try std.testing.expectError(error.EmptyTitle, add_task(allocator, "", tmp_dir.dir));
+    try std.testing.expectError(error.EmptyTitle, add_task(allocator, io, "", tmp_dir.dir));
 }
 
 test "multiple tasks have unique ids" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try add_task(allocator, "First", tmp_dir.dir);
-    try add_task(allocator, "Second", tmp_dir.dir);
-    try add_task(allocator, "Third", tmp_dir.dir);
+    try add_task(allocator, io, "First", tmp_dir.dir);
+    try add_task(allocator, io, "Second", tmp_dir.dir);
+    try add_task(allocator, io, "Third", tmp_dir.dir);
 
-    const tasks = try storage.load_tasks(arena.allocator(), tmp_dir.dir);
+    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
     try std.testing.expectEqual(tasks.len, 3);
     try std.testing.expect(!std.mem.eql(u8, tasks[0].id, tasks[1].id));
     try std.testing.expect(!std.mem.eql(u8, tasks[1].id, tasks[2].id));
@@ -554,19 +558,20 @@ test "multiple tasks have unique ids" {
 
 test "list tasks with mixed statuses" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try add_task(allocator, "Pending Task", tmp_dir.dir);
-    try add_task(allocator, "Done Task", tmp_dir.dir);
+    try add_task(allocator, io, "Pending Task", tmp_dir.dir);
+    try add_task(allocator, io, "Done Task", tmp_dir.dir);
 
-    const tasks = try storage.load_tasks(arena.allocator(), tmp_dir.dir);
-    try mark_complete(allocator, tasks[1].id, tmp_dir.dir);
+    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
+    try mark_complete(allocator, io, tasks[1].id, tmp_dir.dir);
 
-    const updated = try storage.load_tasks(arena.allocator(), tmp_dir.dir);
+    const updated = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
     try std.testing.expectEqual(updated[0].status, .pending);
     try std.testing.expectEqual(updated[1].status, .completed);
 }

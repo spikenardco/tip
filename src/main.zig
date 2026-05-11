@@ -28,19 +28,16 @@ const Args = struct {
         // \\  sync                   Synchronization
         // \\  export                 Export data
         // \\  import                 Import data
-        \\
+        // \\
         \\Run 'tip <command> --help' for more information on a command.
         \\
     ;
 };
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const args = try init.minimal.args.toSlice(allocator);
+    defer init.gpa.free(args);
 
     if (args.len < 2) {
         std.debug.print("{s}\n", .{Args.help});
@@ -60,7 +57,7 @@ pub fn main() !void {
 
     if (parsed.command) |command| {
         switch (command) {
-            .task => |t| task.execute_commands(t),
+            .task => |t| task.execute_commands(init.io, init.minimal.environ, t),
         }
     }
 }

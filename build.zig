@@ -5,10 +5,7 @@ fn generate_version(b: *std.Build) std.Build.LazyPath {
     const zon_path = std.fs.path.join(b.allocator, &.{ project_root, "build.zig.zon" }) catch @panic("OOM");
     defer b.allocator.free(zon_path);
 
-    const zon_file = std.fs.openFileAbsolute(zon_path, .{}) catch @panic("Failed to open build.zig.zon");
-    defer zon_file.close();
-
-    const zon_content = zon_file.readToEndAlloc(b.allocator, std.math.maxInt(usize)) catch @panic("Failed to read build.zig.zon");
+    const zon_content = std.Io.Dir.cwd().readFileAlloc(b.graph.io, zon_path, b.allocator, .unlimited) catch @panic("Failed to read build.zig.zon");
     defer b.allocator.free(zon_content);
 
     var version: []const u8 = "0.0.0";
@@ -32,6 +29,15 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const flags = b.dependency("flags", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("flags");
+
+    const version_module = b.createModule(.{
+        .root_source_file = generate_version(b),
+    });
+
     const exe = b.addExecutable(.{
         .name = "tip",
         .root_module = b.createModule(.{
@@ -41,11 +47,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const flags = b.dependency("flags", .{});
-    exe.root_module.addImport("flags", flags.module("flags"));
-    exe.root_module.addImport("version", b.createModule(.{
-        .root_source_file = generate_version(b),
-    }));
+    exe.root_module.addImport("flags", flags);
+    exe.root_module.addImport("version", version_module);
 
     b.installArtifact(exe);
 
@@ -69,6 +72,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+
     b.step("test", "Run all tests").dependOn(&b.addRunArtifact(all_tests).step);
 }
 
@@ -76,10 +80,10 @@ pub fn build(b: *std.Build) void {
 fn generate_test_runner(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath {
     const files = try collect_files(b, src_dir);
 
-    var content: std.ArrayList(u8) = .empty;
-    defer content.deinit(b.allocator);
+    var aw = std.Io.Writer.Allocating.init(b.allocator);
+    defer aw.deinit();
 
-    const w = content.writer(b.allocator);
+    const w = &aw.writer;
     try w.writeAll("// Auto-generated - do not edit\ntest {\n");
     for (files) |f| {
         try w.print("    _ = @import(\"{s}\");\n", .{f});
@@ -88,7 +92,7 @@ fn generate_test_runner(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath 
 
     const wf = b.addWriteFiles();
     _ = wf.addCopyDirectory(b.path(src_dir), src_dir, .{});
-    return wf.add("auto_test_runner.zig", content.items);
+    return wf.add("auto_test_runner.zig", aw.written());
 }
 
 fn collect_files(b: *std.Build, dir: []const u8) ![]const []const u8 {
@@ -105,16 +109,16 @@ fn collect_files(b: *std.Build, dir: []const u8) ![]const []const u8 {
         const full = try std.fs.path.join(gpa, &.{ root, current });
         defer gpa.free(full);
 
-        var d = std.fs.openDirAbsolute(full, .{ .iterate = true }) catch |e| {
+        var d = std.Io.Dir.openDirAbsolute(b.graph.io, full, .{ .iterate = true }) catch |e| {
             switch (e) {
                 error.FileNotFound => continue,
                 else => return e,
             }
         };
-        defer d.close();
+        defer d.close(b.graph.io);
 
         var it = d.iterate();
-        while (try it.next()) |e| {
+        while (try it.next(b.graph.io)) |e| {
             if (e.name[0] == '.') continue;
             if (e.kind == .file and std.mem.endsWith(u8, e.name, ".zig")) {
                 try files.append(gpa, try std.fs.path.join(gpa, &.{ current, e.name }));
