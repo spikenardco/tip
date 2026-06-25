@@ -24,7 +24,7 @@ zig build test --summary all
 ## Installation
 
 ```bash
-git clone https://github.com/atisans/tip
+git clone https://github.com/spikenardco/tip
 cd tip
 zig build
 ```
@@ -32,7 +32,7 @@ zig build
 ## Development
 
 ### Prerequisites
-- Zig 0.15+
+- Zig 0.16+
 
 ### Running Tests
 ```bash
