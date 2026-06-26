@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Clone repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2
@@ -64,7 +64,7 @@ jobs:
           sha256sum tip-windows-x86_64.exe tip-macos-x86_64 tip-macos-arm64 tip-linux-x86_64 tip-linux-arm64 > checksums.txt
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |
