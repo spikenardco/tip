@@ -70,6 +70,11 @@ pub const TaskArgs = struct {
             name: []const u8,
             desc: ?[]const u8 = null,
         },
+        edit: struct {
+            id: []const u8,
+            title: []const u8,
+            desc: ?[]const u8 = null,
+        },
         delete: struct {
             id: []const u8,
         },
@@ -90,6 +95,10 @@ pub const TaskArgs = struct {
         \\Commands:
         \\  add
         \\      --name=<name>              Add new task
+        \\      --desc=<description>       The description of the task
+        \\  edit
+        \\      --id=<id>             The id of the task to edit
+        \\      --title=<title>            The task's title
         \\      --desc=<description>       The description of the task
         \\  delete
         \\      --id=<id>                  delete task id.
@@ -125,6 +134,10 @@ pub fn execute_commands(io: std.Io, environ: std.process.Environ, T: TaskArgs) v
         switch (subcommand) {
             .add => |add| add_task(allocator, io, dir, add.name, add.desc) catch {
                 std.debug.print("Failed to add task\n", .{});
+                return;
+            },
+            .edit => |edit| edit_task(allocator, io, dir, edit.id, edit.title, edit.desc orelse "") catch {
+                std.debug.print("Failed to update task\n", .{});
                 return;
             },
             .delete => |del| delete_task(allocator, io, del.id, dir) catch {
@@ -339,6 +352,39 @@ fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, 
     return error.InvalidItem;
 }
 
+fn edit_task(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    task_id: []const u8,
+    title: []const u8,
+    desc: []const u8,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const existing = try storage.load_tasks(arena.allocator(), io, dir);
+
+    for (0..existing.len) |i| {
+        const id = existing[i].id;
+        const match = if (task_id.len >= 4 and id.len >= task_id.len)
+            std.mem.eql(u8, id[0..task_id.len], task_id)
+        else
+            std.mem.eql(u8, id, task_id);
+
+        if (match) {
+            existing[i].title = title;
+            existing[i].description = desc;
+            existing[i].updated_at = unix_timestamp(io);
+            try storage.save_tasks(arena.allocator(), io, dir, existing);
+            return;
+        }
+    }
+
+    std.debug.print("No task found matching '{s}'\n", .{task_id});
+    return error.InvalidItem;
+}
+
 /// Removes the task matching `task_id` from storage. Returns `error.InvalidItem`
 /// if no task with that id exists. Supports partial ID matching (min 4 chars).
 fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
@@ -451,6 +497,29 @@ test "add and list tasks" {
     try std.testing.expectEqual(tasks[0].status, .pending);
     try std.testing.expect(tasks[0].id.len > 0);
     try std.testing.expect(tasks[0].created_at > 0);
+}
+
+test "update tasks" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    try add_task(allocator, io, tmp_dir.dir, "Test Task", null);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
+    try std.testing.expectEqual(tasks.len, 1);
+    try std.testing.expectEqualStrings(tasks[0].title, "Test Task");
+
+    // edit task
+    try edit_task(allocator, io, tmp_dir.dir, tasks[0].id, "something new", "blank desc");
+    // load all new tasks.
+    const tasks2 = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
+    try std.testing.expectEqualStrings(tasks2[0].description.?, "blank desc");
 }
 
 test "delete task" {
