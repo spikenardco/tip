@@ -28,11 +28,12 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "flags", .module = flags },
+                .{ .name = "version", .module = version_module },
+            },
         }),
     });
-
-    exe.root_module.addImport("flags", flags);
-    exe.root_module.addImport("version", version_module);
 
     b.installArtifact(exe);
 
