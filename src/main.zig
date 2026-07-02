@@ -4,10 +4,9 @@ const flags = @import("flags");
 const task = @import("core/task.zig");
 
 const Args = struct {
-    version: bool = false,
-    command: ?union(enum) {
+    command: union(enum) {
         task: task.TaskArgs,
-    } = null,
+    },
 
     pub const help =
         \\Tip - Password and Task Manager
@@ -35,29 +34,26 @@ const Args = struct {
 };
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
+    const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
-    defer init.gpa.free(args);
 
     if (args.len < 2) {
-        std.debug.print("{s}\n", .{Args.help});
+        std.debug.print("{s}\n", .{flags.usage(Args)});
         return;
     }
 
-    const parsed = flags.parse(allocator, args, Args) catch |err| {
-        return switch (err) {
-            else => std.debug.print("{any}\n", .{err}),
-        };
-    };
-
-    if (parsed.version) {
+    if (std.mem.eql(u8, args[1], "-v") or std.mem.eql(u8, args[1], "--version")) {
         std.debug.print("{s}\n", .{app.version});
         return;
     }
 
-    if (parsed.command) |command| {
-        switch (command) {
-            .task => |t| task.execute_commands(init.io, init.minimal.environ, t),
-        }
+    var diagnostics: flags.Diagnostic = .{};
+    const parsed = flags.parse(allocator, args, Args, &diagnostics) catch |err| {
+        diagnostics.report();
+        std.process.exit(if (err == error.HelpRequested) 0 else 1);
+    };
+
+    switch (parsed.command) {
+        .task => |t| task.execute_commands(init.io, init.minimal.environ, t),
     }
 }
