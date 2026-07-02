@@ -1,30 +1,5 @@
 const std = @import("std");
 
-fn generate_version(b: *std.Build) std.Build.LazyPath {
-    const project_root = b.build_root.path orelse ".";
-    const zon_path = std.fs.path.join(b.allocator, &.{ project_root, "build.zig.zon" }) catch @panic("OOM");
-    defer b.allocator.free(zon_path);
-
-    const zon_content = std.Io.Dir.cwd().readFileAlloc(b.graph.io, zon_path, b.allocator, .unlimited) catch @panic("Failed to read build.zig.zon");
-    defer b.allocator.free(zon_content);
-
-    var version: []const u8 = "0.0.0";
-    var lines = std.mem.splitScalar(u8, zon_content, '\n');
-    while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, std.mem.trim(u8, line, " "), ".version =")) {
-            const quote_start = std.mem.indexOf(u8, line, "\"").?;
-            const quote_end = std.mem.lastIndexOf(u8, line, "\"").?;
-            version = line[quote_start + 1 .. quote_end];
-            break;
-        }
-    }
-
-    const version_content = std.fmt.allocPrint(b.allocator, "pub const version = \"{s}\";\n", .{version}) catch @panic("OOM");
-
-    const wf = b.addWriteFiles();
-    return wf.add("version.zig", version_content);
-}
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -34,8 +9,17 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }).module("flags");
 
+    const manifest = std.zon.parse.fromSliceAlloc(
+        struct { version: []const u8 },
+        b.allocator,
+        @embedFile("build.zig.zon"),
+        null,
+        .{ .ignore_unknown_fields = true },
+    ) catch @panic("bad zon");
+
     const version_module = b.createModule(.{
-        .root_source_file = generate_version(b),
+        .root_source_file = b.addWriteFiles().add("version.zig",
+            b.fmt("pub const version = \"{s}\";\n", .{manifest.version})),
     });
 
     const exe = b.addExecutable(.{
