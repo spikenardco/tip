@@ -1,5 +1,5 @@
 const std = @import("std");
-const app = @import("version");
+const version_mod = @import("version");
 const flags = @import("flags");
 const task = @import("core/task.zig");
 
@@ -9,7 +9,7 @@ const Args = struct {
     },
 
     pub const help =
-        \\Tip - Password and Task Manager
+        \\Tip - task manager
         \\
         \\Usage:
         \\  tip <command> [args] [flags]
@@ -19,15 +19,8 @@ const Args = struct {
         \\  -v, --version         Show version
         \\
         \\Commands:
-        \\  task                   Task management
-        // \\  password               Password management
-        // \\  vault                  Vault management
-        // \\  config                 Configuration
-        // \\  auth                   Authentication
-        // \\  sync                   Synchronization
-        // \\  export                 Export data
-        // \\  import                 Import data
-        // \\
+        \\  task                  Task management
+        \\
         \\Run 'tip <command> --help' for more information on a command.
         \\
     ;
@@ -43,17 +36,17 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (std.mem.eql(u8, args[1], "-v") or std.mem.eql(u8, args[1], "--version")) {
-        std.debug.print("{s}\n", .{app.version});
+        std.debug.print("{s}\n", .{version_mod.version});
         return;
     }
 
-    var diagnostics: flags.Diagnostic = .{};
-    const parsed = flags.parse(allocator, args, Args, &diagnostics) catch |err| {
-        diagnostics.report();
+    var diag: flags.Diagnostic = .{};
+    const parsed = flags.parse(allocator, args, Args, &diag) catch |err| {
+        diag.report();
         std.process.exit(if (err == error.HelpRequested) 0 else 1);
     };
 
     switch (parsed.command) {
-        .task => |t| task.execute_commands(init.io, init.minimal.environ, t),
+        .task => |t| task.dispatch_task_command(init.io, init.minimal.environ, t),
     }
 }

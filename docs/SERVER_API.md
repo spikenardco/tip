@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Tip Server provides a RESTful API for remote mode operations, enabling team collaboration, multi-device sync, and web platform access. The API uses JSON for request/response and requires authentication via JWT tokens.
+The Tip Server provides a RESTful API for remote mode operations with team collaboration, multi-device sync, and web platform access. The API uses JSON for request/response and requires authentication via JWT tokens.
 
 ## Base URL and Versioning
 

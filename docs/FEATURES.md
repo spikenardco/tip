@@ -6,7 +6,7 @@ This document consolidates all password management and task management features 
 
 ### Overview
 
-The Password Manager is the core secure storage component of Tip, designed to securely manage passwords with military-grade encryption, flexible organization, and team sharing capabilities.
+The Password Manager is Tip's core secure storage component for managing passwords with encryption, flexible organization, and team sharing capabilities.
 
 ### Data Model
 
@@ -105,7 +105,7 @@ tip password delete --category=finance --confirm
 
 #### 2. Password Generation
 
-Intelligent password generation with customizable rules:
+Password generation with customizable rules:
 
 ##### Basic Generation
 ```bash
@@ -209,7 +209,7 @@ tip password history --name=github --timestamps
 
 #### 5. Search and Discovery
 
-Comprehensive search capabilities:
+Search capabilities:
 
 ```bash
 # Search by name
@@ -964,7 +964,7 @@ tip import --file=backup.json
 
 ### Overview
 
-The Task Manager is a core component of Tip, designed for comprehensive task and workflow management. It supports personal task tracking, team collaboration, and integration with password management workflows.
+The Task Manager handles task and workflow management. It supports personal task tracking, team collaboration, and integration with password management workflows.
 
 ### Data Model
 
@@ -1176,7 +1176,7 @@ tip task list --tag=urgent
 
 #### 7. Search and Filtering
 
-Comprehensive search capabilities:
+Search capabilities:
 
 ```bash
 # Search by title/description
@@ -1464,7 +1464,7 @@ tip t search --query="bug"
 
 ### Testing
 
-The Task Manager includes comprehensive tests:
+The Task Manager includes tests:
 
 ```bash
 # Run all tests

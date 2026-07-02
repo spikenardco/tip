@@ -5,33 +5,19 @@ Complete documentation for the Tip password and task manager project.
 ## Project Overview
 
 ## Project Vision
-Tip is a comprehensive self-hosted platform that seamlessly integrates password management (similar to 1Password) with task management capabilities. The platform is designed with a multi-tier architecture that provides flexibility for different use cases while maintaining security and simplicity.
+A self-hosted password and task manager. Uses a multi-tier architecture with local-first storage and optional remote sync.
 
 ## Core Components
 
 ### 1. CLI Tool (`tip`)
-A powerful command-line interface that operates in two distinct modes:
-- **Local Mode**: Direct file/database access for offline-first usage
-- **Remote Mode**: HTTP client communication with self-hosted server
-- **Storage Flexibility**: JSON files or SQLite database backend
-- **Security**: End-to-end encryption with master password protection
+Operates in local mode (direct file/database access) or remote mode (HTTP client to self-hosted server).
+Uses JSON or SQLite storage with end-to-end encryption.
 
 ### 2. Web Server (`tip-server`)
-Self-hosted backend service providing:
-- **RESTful API**: Complete CRUD operations for passwords and tasks
-- **OAuth Authentication**: GitHub and Google login integration
-- **Token Management**: CLI access tokens with expiration
-- **Dashboard API**: Web interface for data management
-- **Multi-tenant**: Isolated vaults per user/organization
-- **Database**: SQLite for simplicity and reliability
-- **Real-time Sync**: Conflict resolution and data synchronization
+Self-hosted backend with REST API, OAuth auth, multi-tenant vaults, SQLite storage, and sync.
 
 ### 3. Web Platform (`tip-web`)
-Future browser-based interface offering:
-- **Full UI**: Complete password and task management
-- **Real-time Collaboration**: Live updates and sharing
-- **Browser Extension**: Auto-fill and quick access
-- **Mobile Responsive**: Cross-device compatibility
+Future browser interface (not yet started).
 
 ## Current Implementation Status
 
@@ -66,36 +52,9 @@ Future browser-based interface offering:
 - **Deployment Options**: Self-hosted, Docker, or binary installation
 - **Configuration**: Extensive customization via config files
 
-### Developer Experience
-- **Clean Architecture**: Separated concerns with clear interfaces
-- **Comprehensive Testing**: Unit, integration, and end-to-end tests
-- **Documentation**: Complete API docs and user guides
-- **Extensibility**: Plugin system for custom features
-
-## Target Use Cases
-
-### Individual Users
-- **Personal Password Vault**: Secure storage for all credentials
-- **Task Management**: Personal to-do lists with reminders
-- **Local Usage**: Offline-first with optional cloud sync
-- **Cross-Device**: Sync between laptop, desktop, and mobile
-
-### Teams & Organizations
-- **Shared Passwords**: Encrypted sharing among team members
-- **Collaborative Tasks**: Project management with assignments
-- **Access Control**: Role-based permissions and audit logs
-- **Self-Hosted**: Complete data ownership and control
-
-### Developers & Power Users
-- **CLI Integration**: Scriptable automation and workflows
-- **API Access**: RESTful API for custom integrations
-- **Configuration**: Fine-grained control over all aspects
-- **Extensions**: Plugin system for custom functionality
-
 ## Technical Highlights
 
 ### Performance
-- **Optimized Storage**: Efficient data structures and indexing
 - **Caching**: In-memory caching for frequently accessed data
 - **Lazy Loading**: On-demand data retrieval
 - **Compression**: Reduced storage and bandwidth usage

@@ -2,12 +2,11 @@
 
 A task manager built with Zig.
 
-
 ## Quick Start
 
 ```bash
 # Add a task
-tip task add --name=github --desc="Review code"
+tip task add --title="Review code" --desc="Review PR #42"
 
 # List tasks
 tip task --list
@@ -49,46 +48,6 @@ zig build
 zig build run
 ```
 
-## Use Cases
-
-**Individual Users**
-- Secure personal password vault
-- Task and todo list management
-- Offline-first operation
-
-**Teams**
-- Shared password management
-- Collaborative task tracking
-- Team member permissions
-- Audit trails and compliance
-
-**Developers**
-- CLI-based automation
-- REST API integration
-- Custom field support
-- Git-friendly configuration
-
-## Security Notes
-
-- Master password never stored, only derived key
-- All sensitive data encrypted at rest and in transit
-- Uses industry-standard cryptographic algorithms
-- Comprehensive audit logging
-- Regular security assessments recommended
-
-## Self-Hosted Deployment
-
-Tip is designed for self-hosted deployment:
-
 ## License
 
 MIT License - See [LICENSE](LICENSE)
-
-## Contributing
-
-Contributions welcome! Please see the development roadmap in [docs/ROADMAP.md](docs/ROADMAP.md)
-
-## Support
-
-- Documentation: [docs/](docs/)
-- Issues: GitHub Issues

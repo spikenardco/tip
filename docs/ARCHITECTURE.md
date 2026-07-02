@@ -822,11 +822,11 @@ Cross-compiled binaries (via CI/CD)
 
 ### Implementation Priorities
 
-1. **Core CLI**: Structured commands with comprehensive functionality
-2. **Essential Security**: Master password + OAuth + token management
-3. **Multi-Vault Support**: Complete vault lifecycle management
-4. **Storage Flexibility**: JSON/SQLite with mode switching
-5. **Web Dashboard**: OAuth login + token management + data viewing
+1. Core CLI with structured commands
+2. Master password + OAuth + token management
+3. Vault lifecycle management
+4. JSON/SQLite storage backends
+5. Web dashboard for token management
 
 ### OAuth Integration Flow
 
@@ -839,42 +839,14 @@ Cross-compiled binaries (via CI/CD)
 
 ### Command Architecture Highlights
 
-- **Hierarchical Structure**: Clear command grouping by functionality
-- **Consistent Patterns**: Standard add/get/list/delete across all modules
-- **Global Configuration**: Centralized settings with vault switching
-- **Comprehensive Coverage**: All operations accessible via CLI
-- **Multi-Mode Support**: Seamless local/remote mode switching
-- **Advanced Features**: Categories, tags, search, sharing, sync
+- Standard add/get/list/delete patterns across modules
+- Global configuration with vault switching
+- Local and remote mode support
 
 ### Security & Architecture
 
-- **Zero-Knowledge**: Server stores encrypted data only
-- **OAuth Integration**: GitHub/Google authentication for web platform
-- **Token-Based Access**: CLI tokens with expiration and revocation
-- **End-to-End Encryption**: AES-256-GCM for all sensitive data
-- **Multi-Tenant**: Isolated vaults per user/organization
-- **Audit Trail**: Complete operation logging and tracking
-
-#### Global Configuration
-- **Centralized Config**: Single configuration file manages all settings
-- **Mode Switching**: Seamless transition between local and remote modes
-- **Storage Backend**: Runtime switching between JSON and SQLite
-- **Verbose Control**: Detailed logging when needed, quiet mode for automation
-
-#### Vault Management
-- **Multi-Vault Support**: Organize passwords and tasks by project/client
-- **Isolation**: Each vault has separate encryption and authentication
-- **Backup/Restore**: Complete vault backup and migration capabilities
-- **Vault Switching**: Quick context switching between vaults
-
-#### Authentication Strategy
-- **OAuth Integration**: GitHub and Google login for web platform
-- **Token Management**: Separate CLI tokens for automated access
-- **Local Security**: Master password for local vault access
-- **Session Management**: Secure token refresh and revocation
-
-#### Security Features
-- **Encryption**: End-to-end encryption for all sensitive data
-- **Token Security**: Expiring tokens with revocation capability
-- **Memory Protection**: Secure handling of sensitive information
-- **Audit Trail**: Complete logging of all operations
+- Zero-knowledge: server stores encrypted data only
+- End-to-end encryption: AES-256-GCM for all sensitive data
+- Token-based access with expiration and revocation
+- Multi-tenant vault isolation
+- Audit trail for all operations

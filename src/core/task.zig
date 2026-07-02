@@ -3,7 +3,7 @@ const models = @import("models.zig");
 const storage = @import("../storage/json.zig");
 const generate = @import("../utils/generate.zig");
 
-const Color = enum {
+const Ansi = enum {
     red,
     green,
     yellow,
@@ -11,7 +11,7 @@ const Color = enum {
     reset,
 };
 
-fn color(c: Color) []const u8 {
+fn ansi_code(c: Ansi) []const u8 {
     return switch (c) {
         .red => "\x1b[31m",
         .green => "\x1b[32m",
@@ -21,7 +21,7 @@ fn color(c: Color) []const u8 {
     };
 }
 
-fn priority_label(priority: ?models.Task.Priority) []const u8 {
+fn priority_glyph(priority: ?models.Task.Priority) []const u8 {
     if (priority) |p| {
         return switch (p) {
             .high => "↑",
@@ -32,7 +32,7 @@ fn priority_label(priority: ?models.Task.Priority) []const u8 {
     return "";
 }
 
-fn priority_color(priority: ?models.Task.Priority) Color {
+fn priority_color(priority: ?models.Task.Priority) Ansi {
     if (priority) |p| {
         return switch (p) {
             .high => .red,
@@ -51,7 +51,7 @@ fn status_icon(status: models.Task.Status) []const u8 {
     };
 }
 
-fn status_color(status: models.Task.Status) Color {
+fn status_color(status: models.Task.Status) Ansi {
     return switch (status) {
         .pending => .reset,
         .in_progress => .cyan,
@@ -59,7 +59,7 @@ fn status_color(status: models.Task.Status) Color {
     };
 }
 
-fn unix_timestamp(io: std.Io) i64 {
+fn now_seconds(io: std.Io) i64 {
     return std.Io.Timestamp.now(io, .real).toSeconds();
 }
 
@@ -67,7 +67,7 @@ pub const TaskArgs = struct {
     list: bool = false,
     subcommand: ?union(enum) {
         add: struct {
-            name: []const u8,
+            title: []const u8,
             desc: ?[]const u8 = null,
         },
         edit: struct {
@@ -84,37 +84,33 @@ pub const TaskArgs = struct {
     } = null,
 
     pub const help =
-        \\Task Management Commands
-        \\
         \\Usage:
         \\  tip task <subcommand> [args] [flags]
         \\
         \\Options:
-        \\  --list                        List all tasks
+        \\  --list                    List all tasks
         \\
         \\Commands:
         \\  add
-        \\      --name=<name>              Add new task
-        \\      --desc=<description>       The description of the task
+        \\      --title=<title>       Add a new task
+        \\      --desc=<description>  Task description
         \\  edit
-        \\      --id=<id>             The id of the task to edit
-        \\      --title=<title>            The task's title
-        \\      --desc=<description>       The description of the task
+        \\      --id=<id>             Task ID to edit
+        \\      --title=<title>       New title
+        \\      --desc=<description>  New description
         \\  delete
-        \\      --id=<id>                  delete task id.
+        \\      --id=<id>             Task ID to delete
         \\  show
-        \\      --id=<id>                  Show task details
-        \\
+        \\      --id=<id>             Show task details
         \\
         \\Examples:
         \\  tip task --list
-        \\  tip task add --name="Review code"
+        \\  tip task add --title="Review code"
         \\
     ;
 };
 
-/// Dispatches the appropriate task operation based on the parsed CLI arguments.
-pub fn execute_commands(io: std.Io, environ: std.process.Environ, T: TaskArgs) void {
+pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: TaskArgs) void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -125,18 +121,18 @@ pub fn execute_commands(io: std.Io, environ: std.process.Environ, T: TaskArgs) v
     };
     defer dir.close(io);
 
-    if (T.list) {
+    if (args.list) {
         list_task(allocator, io, dir) catch {};
         return;
     }
 
-    if (T.subcommand) |subcommand| {
+    if (args.subcommand) |subcommand| {
         switch (subcommand) {
-            .add => |add| add_task(allocator, io, dir, add.name, add.desc) catch {
+            .add => |a| add_task(allocator, io, dir, a.title, a.desc) catch {
                 std.debug.print("Failed to add task\n", .{});
                 return;
             },
-            .edit => |edit| edit_task(allocator, io, dir, edit.id, edit.title, edit.desc orelse "") catch {
+            .edit => |e| edit_task(allocator, io, dir, e.id, e.title, e.desc orelse "") catch {
                 std.debug.print("Failed to update task\n", .{});
                 return;
             },
@@ -154,7 +150,6 @@ pub fn execute_commands(io: std.Io, environ: std.process.Environ, T: TaskArgs) v
     }
 }
 
-/// Creates a new task with the given title and persists it to storage.
 fn add_task(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -171,26 +166,23 @@ fn add_task(
 
     var tasks: std.ArrayList(models.Task) = .empty;
     defer tasks.deinit(allocator);
-    for (existing) |task| {
-        tasks.append(allocator, task) catch continue;
+    for (existing) |t| {
+        tasks.append(allocator, t) catch continue;
     }
 
-    const id = try generate.uuid(allocator, io);
+    const id = try generate.generate_id(allocator, io);
     defer allocator.free(id);
     try tasks.append(allocator, .{
         .status = .pending,
         .id = id[0..],
         .title = title,
         .description = description orelse "",
-        .created_at = unix_timestamp(io),
+        .created_at = now_seconds(io),
     });
-    std.debug.print("Adding task: {s}\n", .{title});
-    std.debug.print("task description: {s}\n", .{description orelse ""});
 
     try storage.save_tasks(arena.allocator(), io, dir, tasks.items);
 }
 
-/// Loads and prints all tasks from storage.
 fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -220,7 +212,7 @@ fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     }
 
     if (pending.items.len > 0) {
-        std.debug.print("{s}Pending{s} ({d})\n", .{ color(.cyan), color(.reset), pending.items.len });
+        std.debug.print("{s}Pending{s} ({d})\n", .{ ansi_code(.cyan), ansi_code(.reset), pending.items.len });
         for (pending.items) |task| {
             try print_task(io, task, false);
         }
@@ -228,7 +220,7 @@ fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     }
 
     if (in_progress.items.len > 0) {
-        std.debug.print("{s}In Progress{s} ({d})\n", .{ color(.cyan), color(.reset), in_progress.items.len });
+        std.debug.print("{s}In Progress{s} ({d})\n", .{ ansi_code(.cyan), ansi_code(.reset), in_progress.items.len });
         for (in_progress.items) |task| {
             try print_task(io, task, false);
         }
@@ -236,7 +228,7 @@ fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     }
 
     if (completed.items.len > 0) {
-        std.debug.print("{s}Completed{s} ({d})\n", .{ color(.green), color(.reset), completed.items.len });
+        std.debug.print("{s}Completed{s} ({d})\n", .{ ansi_code(.green), ansi_code(.reset), completed.items.len });
         for (completed.items) |task| {
             try print_task(io, task, false);
         }
@@ -245,11 +237,11 @@ fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
 
 fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
     const c_status = status_color(task.status);
-    const c_reset = color(.reset);
+    const c_reset = ansi_code(.reset);
     const compact_id = if (task.id.len > 8) task.id[0..8] else task.id;
 
     if (detailed) {
-        std.debug.print("{s}=== Task Details ==={s}\n\n", .{ color(.cyan), c_reset });
+        std.debug.print("{s}=== Task Details ==={s}\n\n", .{ ansi_code(.cyan), c_reset });
         std.debug.print("ID:          {s}\n", .{task.id});
         std.debug.print("Title:       {s}\n", .{task.title});
 
@@ -259,16 +251,16 @@ fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
             std.debug.print("Description: -\n", .{});
         }
 
-        std.debug.print("Status:      {s}{s}{s}\n", .{ color(c_status), status_icon(task.status), c_reset });
+        std.debug.print("Status:      {s}{s}{s}\n", .{ ansi_code(c_status), status_icon(task.status), c_reset });
 
         if (task.priority) |p| {
-            std.debug.print("Priority:    {s}{s}{s}\n", .{ color(priority_color(task.priority)), priority_label(p), c_reset });
+            std.debug.print("Priority:    {s}{s}{s}\n", .{ ansi_code(priority_color(task.priority)), priority_glyph(p), c_reset });
         } else {
             std.debug.print("Priority:    -\n", .{});
         }
 
         if (task.due_date) |due| {
-            const now = unix_timestamp(io);
+            const now = now_seconds(io);
             if (due < now) {
                 std.debug.print("Due Date:    {d} (overdue)\n", .{due});
             } else {
@@ -299,40 +291,38 @@ fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
             std.debug.print("Completed:   -\n", .{});
         }
     } else {
-        std.debug.print("  {s}{s}{s} ", .{ color(c_status), status_icon(task.status), c_reset });
+        std.debug.print("  {s}{s}{s} ", .{ ansi_code(c_status), status_icon(task.status), c_reset });
         if (task.priority) |p| {
-            std.debug.print("{s} ", .{priority_label(p)});
+            std.debug.print("{s} ", .{priority_glyph(p)});
         }
         std.debug.print("{s}\n", .{task.title});
 
         if (task.description) |desc| {
-            std.debug.print("      {s}📝{s} {s}\n", .{ color(.yellow), c_reset, desc });
+            std.debug.print("      {s}desc:{s} {s}\n", .{ ansi_code(.yellow), c_reset, desc });
         }
 
         if (task.due_date) |due| {
-            const now = unix_timestamp(io);
+            const now = now_seconds(io);
             if (due < now) {
-                std.debug.print("      {s}📅 Due: {d} (overdue){s}\n", .{ color(.red), due, c_reset });
+                std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi_code(.red), due, c_reset });
             } else {
-                std.debug.print("      {s}📅 Due: {d}{s}\n", .{ color(.yellow), due, c_reset });
+                std.debug.print("      {s}Due: {d}{s}\n", .{ ansi_code(.yellow), due, c_reset });
             }
         }
 
         if (task.status == .completed) {
             if (task.completed_at) |completed| {
-                std.debug.print("      {s}✓ Completed: {d}{s}\n", .{ color(.green), completed, c_reset });
+                std.debug.print("      {s}Completed: {d}{s}\n", .{ ansi_code(.green), completed, c_reset });
             }
         }
 
-        std.debug.print("      {s}ID: {s}{s}\n", .{ color(.yellow), compact_id, c_reset });
+        std.debug.print("      {s}ID: {s}{s}\n", .{ ansi_code(.yellow), compact_id, c_reset });
     }
 }
 
-/// Marks the task matching `task_id` as completed. Returns `error.InvalidItem`
-/// if no task with that id exists.
 fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit(); // frees everything at once
+    defer arena.deinit();
 
     const tasks = storage.load_tasks(arena.allocator(), io, dir) catch {
         return error.InvalidItem;
@@ -341,8 +331,8 @@ fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, 
     for (tasks) |*task| {
         if (std.mem.eql(u8, task.id, task_id)) {
             task.status = .completed;
-            task.updated_at = unix_timestamp(io);
-            task.completed_at = unix_timestamp(io);
+            task.updated_at = now_seconds(io);
+            task.completed_at = now_seconds(io);
             try storage.save_tasks(arena.allocator(), io, dir, tasks);
             return;
         }
@@ -375,7 +365,7 @@ fn edit_task(
         if (match) {
             existing[i].title = title;
             existing[i].description = desc;
-            existing[i].updated_at = unix_timestamp(io);
+            existing[i].updated_at = now_seconds(io);
             try storage.save_tasks(arena.allocator(), io, dir, existing);
             return;
         }
@@ -385,8 +375,6 @@ fn edit_task(
     return error.InvalidItem;
 }
 
-/// Removes the task matching `task_id` from storage. Returns `error.InvalidItem`
-/// if no task with that id exists. Supports partial ID matching (min 4 chars).
 fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();

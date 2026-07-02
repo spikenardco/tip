@@ -1,17 +1,17 @@
-# Tip - Full Zig Implementation Guide
+# Tip - Zig Implementation Guide
 
-## Executive Summary
+> **Warning:** This is an aspirational guide describing a planned architecture. The actual implementation is in `src/`. Many code blocks below use pre-0.16 Zig APIs and are not directly compilable. They show intent, not production code.
 
-This document provides a comprehensive blueprint for implementing the Tip password and task manager entirely in Zig, matching the full architecture described in the Go documentation but adapted for Zig's unique features and constraints.
+The task manager currently exists (see `src/core/task.zig`). The rest (vaults, passwords, crypto, HTTP server, remote sync) is planned.
 
-**Project Scope:**
+**Project Scope (planned):**
 - 5 implementation phases
-- ~3,000-5,000 lines of production Zig code
+- ~3,000-5,000 lines of Zig
 - 20+ source modules
-- Complete CLI with 30+ commands
-- Full HTTP server with REST API
+- CLI with 30+ commands
+- HTTP server with REST API
 - End-to-end encryption (AES-256-GCM + Argon2id)
-- Multi-storage backends (JSON, SQLite, Remote)
+- Multiple storage backends (JSON, SQLite, Remote)
 
 ---
 
@@ -262,7 +262,7 @@ pub const Vault = struct {
     
     pub fn init(allocator: std.mem.Allocator, name: []const u8, owner_id: []const u8) !Vault {
         const id = try generateUuid(allocator);
-        const now = std.time.timestamp();
+        const now = std.Io.Timestamp.now(io, .real).toSeconds();
         
         return .{
             .allocator = allocator,
@@ -329,7 +329,7 @@ pub const Password = struct {
     
     pub fn init(allocator: std.mem.Allocator, vault_id: []const u8, title: []const u8) !Password {
         const id = try generateUuid(allocator);
-        const now = std.time.timestamp();
+        const now = std.Io.Timestamp.now(io, .real).toSeconds();
         
         return .{
             .allocator = allocator,
@@ -375,7 +375,7 @@ pub const Password = struct {
         const encrypted = try crypto.encrypt(self.allocator, plaintext, key);
         self.allocator.free(self.encrypted_password);
         self.encrypted_password = encrypted;
-        self.updated_at = std.time.timestamp();
+        self.updated_at = std.Io.Timestamp.now(io, .real).toSeconds();
         self.version += 1;
     }
     
@@ -406,7 +406,7 @@ pub const Task = struct {
     
     pub fn init(allocator: std.mem.Allocator, vault_id: []const u8, title: []const u8) !Task {
         const id = try generateUuid(allocator);
-        const now = std.time.timestamp();
+        const now = std.Io.Timestamp.now(io, .real).toSeconds();
         
         return .{
             .allocator = allocator,
@@ -437,13 +437,13 @@ pub const Task = struct {
     
     pub fn complete(self: *Task) void {
         self.status = .completed;
-        self.completed_at = std.time.timestamp();
-        self.updated_at = std.time.timestamp();
+        self.completed_at = std.Io.Timestamp.now(io, .real).toSeconds();
+        self.updated_at = std.Io.Timestamp.now(io, .real).toSeconds();
     }
     
     pub fn isOverdue(self: Task) bool {
         if (self.due_date) |due| {
-            return std.time.timestamp() > due and self.status != .completed;
+            return std.Io.Timestamp.now(io, .real).toSeconds() > due and self.status != .completed;
         }
         return false;
     }
@@ -465,7 +465,7 @@ pub const User = struct {
     
     pub fn init(allocator: std.mem.Allocator, username: []const u8, email: []const u8) !User {
         const id = try generateUuid(allocator);
-        const now = std.time.timestamp();
+        const now = std.Io.Timestamp.now(io, .real).toSeconds();
         
         return .{
             .allocator = allocator,
@@ -491,7 +491,7 @@ pub const User = struct {
         const hash = try crypto.hashPassword(self.allocator, password);
         self.allocator.free(self.password_hash);
         self.password_hash = hash;
-        self.updated_at = std.time.timestamp();
+        self.updated_at = std.Io.Timestamp.now(io, .real).toSeconds();
     }
     
     pub fn verifyPassword(self: User, password: []const u8) !bool {
@@ -539,7 +539,7 @@ pub fn deriveKey(
 /// Generate random salt for key derivation
 pub fn generateSalt() [16]u8 {
     var salt: [16]u8 = undefined;
-    crypto.random.bytes(&salt);
+    io.random(salt);
     return salt;
 }
 
@@ -600,7 +600,7 @@ pub fn encrypt(
 ) ![]const u8 {
     // Generate random nonce
     var nonce: [NONCE_SIZE]u8 = undefined;
-    crypto.random.bytes(&nonce);
+    io.random(nonce);
     
     // Allocate output buffer: nonce + ciphertext + tag
     const out_len = NONCE_SIZE + plaintext.len + TAG_SIZE;
@@ -870,7 +870,7 @@ pub const JsonStorage = struct {
     
     pub fn init(allocator: std.mem.Allocator, base_path: []const u8) !JsonStorage {
         // Ensure directory exists
-        try std.fs.cwd().makePath(base_path);
+        try std.Io.Dir.cwd().makePath(base_path);
         
         return .{
             .allocator = allocator,
@@ -903,7 +903,7 @@ pub const JsonStorage = struct {
         const temp_path = try std.mem.concat(self.allocator, u8, &.{ path, ".tmp" });
         defer self.allocator.free(temp_path);
         
-        const file = try std.fs.cwd().createFile(temp_path, .{});
+        const file = try std.Io.Dir.cwd().createFile(temp_path, .{});
         defer file.close();
         
         // Serialize vault to JSON
@@ -914,12 +914,12 @@ pub const JsonStorage = struct {
         try file.sync();
         
         // Atomic rename
-        try std.fs.cwd().rename(temp_path, path);
+        try std.Io.Dir.cwd().rename(temp_path, path);
     }
     
     fn vaultToJson(allocator: std.mem.Allocator, vault: *const core.Vault) ![]const u8 {
         // Serialize using std.json
-        var buf = std.ArrayList(u8).init(allocator);
+        var buf = std.ArrayList(u8).empty;
         defer buf.deinit();
         
         try std.json.stringify(.{
@@ -931,7 +931,7 @@ pub const JsonStorage = struct {
             .updated_at = vault.updated_at,
         }, .{ .whitespace = .indent_2 }, buf.writer());
         
-        return buf.toOwnedSlice();
+        return alloc_writer.written();
     }
     
     // ... implement other methods
@@ -962,40 +962,34 @@ const std = @import("std");
 const core = @import("../core/types.zig");
 const Storage = @import("interface.zig").Storage;
 
-// Use zig-sqlite or cImport sqlite3
-const c = @cImport({
-    @cInclude("sqlite3.h");
-});
+// Use zig-sqlite wrapper, or addTranslateC + linkSystemLibrary in build.zig
+// (0.16 deprecates @cImport; use build system instead)
+const sqlite = @import("sqlite");
 
 pub const SqliteStorage = struct {
     allocator: std.mem.Allocator,
-    db: *c.sqlite3,
+    db: *sqlite.Db,
     
-    pub fn init(allocator: std.mem.Allocator, db_path: []const u8) !SqliteStorage {
-        var db: ?*c.sqlite3 = null;
-        
-        const rc = c.sqlite3_open(db_path.ptr, &db);
-        if (rc != c.SQLITE_OK) {
-            return error.DatabaseOpenFailed;
-        }
+    pub fn init(allocator: std.mem.Allocator, db_path: []const u8, io: std.Io) !SqliteStorage {
+        var db = try sqlite.Db.open(db_path);
+        errdefer db.close();
         
         var storage = SqliteStorage{
             .allocator = allocator,
-            .db = db.?
+            .db = db,
         };
         
-        // Initialize schema
         try storage.initSchema();
         
         return storage;
     }
     
     pub fn deinit(self: *SqliteStorage) void {
-        _ = c.sqlite3_close(self.db);
+        self.db.close();
     }
     
     fn initSchema(self: SqliteStorage) !void {
-        const schema =
+        try self.db.exec(
             \\ CREATE TABLE IF NOT EXISTS vaults (
             \\   id TEXT PRIMARY KEY,
             \\   name TEXT NOT NULL,
@@ -1031,44 +1025,18 @@ pub const SqliteStorage = struct {
             \\   updated_at INTEGER NOT NULL,
             \\   FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
             \\ );
-        ;
-        
-        var err_msg: ?[*:0]u8 = null;
-        const rc = c.sqlite3_exec(self.db, schema, null, null, &err_msg);
-        
-        if (rc != c.SQLITE_OK) {
-            if (err_msg) |msg| {
-                c.sqlite3_free(msg);
-            }
-            return error.SchemaInitFailed;
-        }
+        , .{}, .{});
     }
     
     pub fn createVault(self: SqliteStorage, vault: *const core.Vault) !void {
-        const sql = "INSERT INTO vaults (id, name, description, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)";
-        
-        var stmt: ?*c.sqlite3_stmt = null;
-        var rc = c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null);
-        if (rc != c.SQLITE_OK) return error.PrepareFailed;
-        defer _ = c.sqlite3_finalize(stmt);
-        
-        // Bind parameters
-        _ = c.sqlite3_bind_text(stmt, 1, vault.id.ptr, @intCast(vault.id.len), c.SQLITE_STATIC);
-        _ = c.sqlite3_bind_text(stmt, 2, vault.name.ptr, @intCast(vault.name.len), c.SQLITE_STATIC);
-        if (vault.description) |desc| {
-            _ = c.sqlite3_bind_text(stmt, 3, desc.ptr, @intCast(desc.len), c.SQLITE_STATIC);
-        } else {
-            _ = c.sqlite3_bind_null(stmt, 3);
-        }
-        _ = c.sqlite3_bind_text(stmt, 4, vault.owner_id.ptr, @intCast(vault.owner_id.len), c.SQLITE_STATIC);
-        _ = c.sqlite3_bind_int64(stmt, 5, vault.created_at);
-        _ = c.sqlite3_bind_int64(stmt, 6, vault.updated_at);
-        
-        rc = c.sqlite3_step(stmt);
-        if (rc != c.SQLITE_DONE) return error.InsertFailed;
+        try self.db.exec(
+            "INSERT INTO vaults (id, name, description, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            .{},
+            .{},
+        );
     }
     
-    // ... implement other methods using prepared statements
+    // ... implement other methods
 };
 ```
 
@@ -1079,78 +1047,43 @@ pub const SqliteStorage = struct {
 **HTTP Client for Remote API:**
 
 ```zig
+> **Note:** `std.http.Client` was removed in Zig 0.16. For remote storage, use raw socket I/O (`std.Io.net`) or a dedicated HTTP library.
+
+```zig
 const std = @import("std");
-const http = std.http;
 const core = @import("../core/types.zig");
-const Storage = @import("interface.zig").Storage;
 
 pub const RemoteStorage = struct {
     allocator: std.mem.Allocator,
     base_url: []const u8,
     auth_token: []const u8,
-    client: http.Client,
     
     pub fn init(allocator: std.mem.Allocator, base_url: []const u8, auth_token: []const u8) !RemoteStorage {
         return .{
             .allocator = allocator,
             .base_url = try allocator.dupe(u8, base_url),
             .auth_token = try allocator.dupe(u8, auth_token),
-            .client = http.Client{ .allocator = allocator },
         };
     }
     
     pub fn deinit(self: *RemoteStorage) void {
-        self.allocator.free(self.base_path);
+        self.allocator.free(self.base_url);
         self.allocator.free(self.auth_token);
-        self.client.deinit();
     }
     
-    fn makeRequest(
-        self: RemoteStorage,
-        method: http.Method,
-        endpoint: []const u8,
-        body: ?[]const u8,
-    ) !http.Client.Response {
-        const url = try std.mem.concat(self.allocator, u8, &.{ self.base_url, endpoint });
-        defer self.allocator.free(url);
-        
-        const headers = .{
-            .{ "Authorization", try std.mem.concat(self.allocator, u8, &.{
-                "Bearer ", self.auth_token }) },
-            .{ "Content-Type", "application/json" },
-        };
-        
-        return try self.client.fetch(.{
-            .method = method,
-            .location = .{ .url = url },
-            .headers = .{ .authorization = .{ .override = headers[0][1] } },
-            .payload = body,
-        });
-    }
+    // HTTP requests use std.Io.net or an external HTTP library.
+    // Implementation depends on the chosen HTTP client approach.
     
     pub fn createVault(self: RemoteStorage, vault: *const core.Vault) !void {
-        const json = try vaultToJson(self.allocator, vault);
-        defer self.allocator.free(json);
-        
-        const response = try self.makeRequest(.POST, "/api/v1/vaults", json);
-        
-        if (response.status != .ok and response.status != .created) {
-            return error.ApiError;
-        }
+        _ = self;
+        _ = vault;
+        @panic("not yet implemented");
     }
     
     pub fn listVaults(self: RemoteStorage, allocator: std.mem.Allocator) ![]core.Vault {
-        const response = try self.makeRequest(.GET, "/api/v1/vaults", null);
-        
-        if (response.status != .ok) {
-            return error.ApiError;
-        }
-        
-        // Parse JSON response
-        const body = try response.reader().readAllAlloc(allocator, 10 * 1024 * 1024); // 10MB max
-        defer allocator.free(body);
-        
-        return try parseVaultsFromJson(allocator, body);
+        _ = self;
+        _ = allocator;
+        @panic("not yet implemented");
     }
     
     // ... implement other methods
@@ -1164,6 +1097,8 @@ pub const RemoteStorage = struct {
 ### 3.1 Command Structure
 
 #### File: `src/cli/parser.zig`
+
+> **Note:** The actual project uses `flags` (github.com/spikenardco/flags.zig) for argument parsing, not `clap`. The code below uses `clap` syntax for illustration.
 
 **CLI Command Definitions:**
 
@@ -1307,7 +1242,7 @@ pub fn parse(allocator: std.mem.Allocator, args: []const []const u8) !Command {
     var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
         .diagnostic = &diag,
     }) catch |err| {
-        diag.report(std.io.getStdErr().writer(), err) catch {};
+        diag.report(std.Io.File.stderr().writer(), err) catch {};
         return err;
     };
     defer res.deinit();
@@ -1348,14 +1283,12 @@ const cli = @import("cli/parser.zig");
 const commands = @import("cli/commands.zig");
 const config = @import("config/loader.zig");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const allocator = init.arena.allocator();
+    const io = init.io;
     
-    // Parse arguments
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(allocator);
     
     const command = cli.parse(allocator, args[1..]) catch |err| {
         switch (err) {
@@ -1363,27 +1296,25 @@ pub fn main() !void {
                 std.log.err("No command specified. Use 'tip --help' for usage.", .{});
                 std.process.exit(1);
             },
-            error.UnknownCommand => |e| {
+            error.UnknownCommand => {
                 std.log.err("Unknown command. Use 'tip --help' for usage.", .{});
-                return e;
+                std.process.exit(1);
             },
             else => return err,
         }
     };
     
-    // Load configuration
-    const cfg = try config.load(allocator);
+    const cfg = try config.load(allocator, io);
     defer config.free(allocator, cfg);
     
-    // Dispatch to appropriate command handler
     switch (command) {
-        .vault => |vc| try commands.handleVault(allocator, cfg, vc),
-        .password => |pc| try commands.handlePassword(allocator, cfg, pc),
-        .task => |tc| try commands.handleTask(allocator, cfg, tc),
-        .config => |cc| try commands.handleConfig(allocator, cfg, cc),
-        .auth => |ac| try commands.handleAuth(allocator, cfg, ac),
-        .sync => |sc| try commands.handleSync(allocator, cfg, sc),
-        .help => |topic| try commands.showHelp(topic),
+        .vault => |vc| try commands.handleVault(allocator, io, cfg, vc),
+        .password => |pc| try commands.handlePassword(allocator, io, cfg, pc),
+        .task => |tc| try commands.handleTask(allocator, io, cfg, tc),
+        .config => |cc| try commands.handleConfig(allocator, io, cfg, cc),
+        .auth => |ac| try commands.handleAuth(allocator, io, cfg, ac),
+        .sync => |sc| try commands.handleSync(allocator, io, cfg, sc),
+        .help => |topic| try commands.showHelp(io, topic),
         .version => try commands.showVersion(),
     }
 }
@@ -1406,11 +1337,12 @@ const VaultCommand = @import("parser.zig").VaultCommand;
 
 pub fn handle(
     allocator: std.mem.Allocator,
+    io: std.Io,
     storage_backend: anytype,
     cmd: VaultCommand,
 ) !void {
     switch (cmd) {
-        .create => |c| try createVault(allocator, storage_backend, c),
+        .create => |c| try createVault(allocator, io, storage_backend, c),
         .open => |c| try openVault(allocator, storage_backend, c),
         .close => try closeVault(allocator, storage_backend),
         .list => try listVaults(allocator, storage_backend),
@@ -1423,10 +1355,10 @@ pub fn handle(
 
 fn createVault(
     allocator: std.mem.Allocator,
+    io: std.Io,
     storage_backend: anytype,
     options: struct { name: []const u8, description: ?[]const u8 },
 ) !void {
-    // Prompt for master password securely
     const password = try terminal.readPassword(allocator, "Enter master password: ");
     defer {
         @memset(password, 0);
@@ -1444,25 +1376,21 @@ fn createVault(
         return error.PasswordMismatch;
     }
     
-    // Generate salt and derive key
-    const salt = crypto.generateSalt();
+    var salt: [16]u8 = undefined;
+    io.random(&salt);
     var key: [32]u8 = undefined;
     try crypto.deriveKey(password, salt, &key);
     defer @memset(&key, 0);
     
-    // Create vault
-    const owner_id = "local_user"; // In multi-user, this would be user's ID
-    var vault = try core.Vault.init(allocator, options.name, owner_id);
+    const owner_id = "local_user";
+    var vault = try core.Vault.init(allocator, io, options.name, owner_id);
     defer vault.deinit();
     
     if (options.description) |desc| {
         vault.description = try allocator.dupe(u8, desc);
     }
     
-    // Store vault
     try storage_backend.createVault(&vault);
-    
-    // Store salt separately (in metadata file)
     try saveVaultMetadata(allocator, vault.id, salt);
     
     std.log.info("Created vault: {s}", .{vault.name});
@@ -1803,8 +1731,8 @@ pub fn requireAuth(ctx: Context) !void {
 pub fn generateToken(allocator: std.mem.Allocator, user_id: []const u8) ![]const u8 {
     const claims = jwt.Claims{
         .sub = user_id,
-        .iat = std.time.timestamp(),
-        .exp = std.time.timestamp() + 86400, // 24 hours
+        .iat = std.Io.Timestamp.now(io, .real).toSeconds(),
+        .exp = std.Io.Timestamp.now(io, .real).toSeconds() + 86400, // 24 hours
     };
     
     return try jwt.encode(allocator, claims, JWT_SECRET);
@@ -1996,7 +1924,7 @@ pub const StrengthAnalysis = struct {
 
 /// Comprehensive password strength analysis
 pub fn analyze(password: []const u8, allocator: std.mem.Allocator) !StrengthAnalysis {
-    var suggestions = std.ArrayList([]const u8).init(allocator);
+    var suggestions = std.ArrayList([]const u8).empty;
     
     // Calculate entropy
     const entropy = calculateEntropy(password);

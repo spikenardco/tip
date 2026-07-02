@@ -2,8 +2,8 @@
 
 > **Status:** DRAFT / in-progress brainstorm. Design only — **no implementation yet.**
 > **Date started:** 2026-06-30
-> **Resume point:** Sub-project **00 (Naming & Conventions Charter)**, Question 2 — confirming
-> the identifier table + two open sub-decisions (boolean prefix rule, constants casing).
+> **Resume point:** Sub-project **00 (Naming & Conventions Charter)** is **DONE** (charter
+> finalized below, §6). Next up: sub-project **01 (ID strategy + error taxonomy)**.
 > See [Open Questions](#open-questions--resume-here) at the bottom.
 
 This file captures **everything** discussed so far so nothing is lost: the product vision,
@@ -70,11 +70,14 @@ ROADMAP.md, SERVER_API.md, ZIG_IMPLEMENTATION_GUIDE.md (2532 lines).
 | D4 | Build **all scopes**, but as **many small implementation plans as possible**, each with checkboxes. | LOCKED |
 | D5 | Do sub-project **00 (naming charter) first**, **design only** — no code yet. Flow per item: design → rename-where-needed → redesign → spec → plan → next. | LOCKED |
 | D6 | **Identifier casing = snake_case for functions** (option B). User explicitly prefers snake_case. | LOCKED |
+| D7 | **Full identifier table adopted** (see §6). Dropped the separate "type-like consts" row; the Types row covers `Color`/`Task`. | LOCKED |
+| D8 | **Boolean prefixes** (`is_`/`has_`/`can_`/`should_`) apply to internal fields and bool-returning functions. **CLI flags are exempt.** | LOCKED |
+| D9 | **Value constants use lowercase `snake_case`** (matches Zig std, e.g. `ns_per_s`). | LOCKED |
+| D10 | **Flag rules:** `--title` everywhere; `--desc` canonical with `--description` as a hidden alias; `show` for read (not `get`); `add` for adding items, `vault init` stays. | LOCKED |
 
-### Still proposed / not yet confirmed
-- The full identifier convention table (types PascalCase, fields snake_case, etc.) — see §6.
-- Boolean prefix rule (`is_`/`has_`/`can_`/`should_`) — OPEN.
-- Constants casing: lowercase `snake_case` vs `UPPER_SNAKE_CASE` — OPEN.
+### All sub-project 00 questions resolved
+Nothing left open in the naming charter. Remaining open items live in later sub-projects
+(ID format in 01, crypto/SQLite interaction in 10, key-session model in 11).
 
 ---
 
@@ -166,36 +169,58 @@ moot/limited once JSON is export-only — D2), `--vault=<name>`, `--verbose`, `-
 
 ---
 
-## 6. Sub-project 00 — Naming & Conventions Charter (IN PROGRESS)
+## 6. Sub-project 00 — Naming & Conventions Charter (DONE)
 
-**Goal:** a decisions-only charter (spec) + a small checkbox plan to apply renames to existing
-task code. ~30 min of actual work later; zero new behavior.
+**Goal:** a decisions-only charter, plus a small checkbox plan to apply the renames to existing
+task code later. Zero new behavior. This section is now the charter of record.
 
-### Proposed identifier convention table (NOT yet confirmed — Q2)
+### Identifier convention table (FINAL — D6, D7, D8, D9)
 
 | Kind | Rule | Example |
 |---|---|---|
 | Functions | `snake_case` | `add_task`, `load_tasks` |
 | Variables / params | `snake_case` | `task_id`, `created_at` |
 | Struct fields | `snake_case` | `due_date`, `completed_at` |
-| Types (struct/enum/union) | `PascalCase` | `TaskArgs`, `Status` |
+| Types (struct/enum/union) | `PascalCase` | `TaskArgs`, `Status`, `Color`, `Task` |
 | Enum members | `snake_case` | `.in_progress`, `.high` |
-| Constants (values) | `snake_case` **or** `UPPER_SNAKE_CASE` | **OPEN** |
-| Compile-time/global "type-like" consts | `PascalCase` | `Color`, `Task` |
+| Value constants | `snake_case` | `max_title_len`, `ns_per_s` |
 | Error sets / members | `PascalCase` set + member | `error.EmptyTitle` |
-| Booleans | affirmative `is_`/`has_`/`can_`/`should_` prefix | `is_locked`, `has_due_date` — **OPEN** |
+| Booleans (fields + bool fns) | affirmative `is_`/`has_`/`can_`/`should_` prefix | `is_locked`, `has_due_date` |
 | Files / modules | `snake_case.zig` | `task.zig`, `json.zig` |
 
-### Two open sub-decisions inside 00
-1. **Boolean prefix rule** — adopt `is_`/`has_`/`can_`/`should_`? (e.g. `T.list` bool → `list_all`,
-   or leave CLI-facing bools alone and only apply internally.)
-2. **Constants casing** — lowercase `snake_case` (Zig-std-leaning) vs `UPPER_SNAKE_CASE`.
+Two buckets, no third case: `PascalCase` means "this is a type," `snake_case` means everything
+else. Types cover the old "type-like consts" cell, so that row is gone (D7).
 
-### 00 deliverables (when we resume)
-- [ ] Confirm identifier table + 2 open sub-decisions.
-- [ ] Lock the flag-naming rules from §5 (title/desc/show-or-get/add verb).
-- [ ] Write the charter spec to `docs/superpowers/specs/`.
-- [ ] Write a checkbox implementation plan (the renames to apply later).
+Booleans get the affirmative prefix **in code only**. CLI flags keep their own UX conventions
+(`--verbose`, not `--is_verbose`) (D8).
+
+### Flag rules (FINAL — D10)
+
+| Rule | Decision |
+|---|---|
+| Title field | `--title` everywhere (matches the model field); drop `add --name`. |
+| Description | `--desc` is canonical; `--description` is a hidden alias. |
+| Read verb | `show` (pairs with `list`; `get` is reserved for the future HTTP layer). |
+| Create verb | `add` for adding items to a vault. `vault init` stays, since creating a vault bootstraps a store rather than adding a row. |
+
+### Renames this charter implies (applied in the 00 plan, not now)
+
+| Current | Becomes | Note |
+|---|---|---|
+| `generate.uuid()` | (deferred) | Final id name is decided in sub-project 01. |
+| `execute_commands()` | `dispatch_task_command()` | dispatches one command, singular. |
+| `color()` | `ansi_code()` | returns an ANSI escape string. |
+| enum `Color` | `Ansi` | `reset` is not a color. |
+| `priority_label()` | `priority_glyph()` | returns a glyph, mirrors `status_icon`. |
+| `unix_timestamp()` | `now_seconds()` | shorter, clearer. |
+| `T: TaskArgs` param | `args` | `T` reads as a type param. |
+| flag `add --name` | `--title` | see flag rules above. |
+
+### 00 deliverables
+- [x] Confirm identifier table + boolean and constants sub-decisions.
+- [x] Lock the flag-naming rules from §5 (title/desc/show/add verb).
+- [x] Record the charter (this section is it; user chose to keep it inline rather than a separate spec file).
+- [ ] Write a checkbox implementation plan for the renames above (next, via writing-plans).
 
 ---
 
@@ -288,19 +313,13 @@ try vault.tasks.complete(id);
 
 ## 10. Open questions / RESUME HERE
 
-We stopped mid sub-project **00**, at **Question 2**. To resume, answer these:
+Sub-project **00 is complete** (charter finalized in §6, D6–D10 locked). The four naming
+questions are all answered.
 
-1. **Confirm the identifier table** in §6 (or adjust).
-2. **Boolean prefix rule:** adopt `is_`/`has_`/`can_`/`should_`? Apply to CLI-facing bools too,
-   or internal only?
-3. **Constants casing:** lowercase `snake_case` or `UPPER_SNAKE_CASE`?
-4. **Flag rules (from §5):** confirm `--title` everywhere, `--desc` (with `--description` alias),
-   and pick `show` **or** `get` for read, and the create verb (`add` vs `new`).
-
-After those are answered:
-- Finalize the 00 charter spec → write to `docs/superpowers/specs/2026-06-30-naming-conventions-charter.md`.
-- Write the 00 checkbox plan (renames to apply).
-- Move to sub-project **01 (ID strategy + error taxonomy)**.
+**Next actions:**
+- Write the 00 checkbox implementation plan for the renames in §6 (via writing-plans).
+- Then move to sub-project **01 (ID strategy + error taxonomy)** — the first open design
+  question there is picking the ID format (SQLite `rowid` vs ULID vs UUIDv7).
 
 ### Process reminder (how we're working)
 Per item: **design → rename-where-needed → redesign → spec → plan → move to next.**
