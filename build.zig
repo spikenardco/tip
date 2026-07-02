@@ -42,14 +42,14 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "Run the app").dependOn(&run_cmd.step);
 
-    const auto_test_file = generate_test_runner(b, "src") catch |err| {
+    const test_runner = create_test_runner(b, "src") catch |err| {
         std.log.err("Failed to generate test runner: {}", .{err});
         return;
     };
 
     const all_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = auto_test_file,
+            .root_source_file = test_runner,
             .target = target,
             .optimize = optimize,
         }),
@@ -58,60 +58,54 @@ pub fn build(b: *std.Build) void {
     b.step("test", "Run all tests").dependOn(&b.addRunArtifact(all_tests).step);
 }
 
-/// Generate test runner in build cache (no disk file to clean up)
-fn generate_test_runner(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath {
-    const files = try collect_files(b, src_dir);
+fn create_test_runner(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath {
+    const allocator = b.allocator;
+    const source_files = try collect_source_files(b, src_dir);
 
-    var aw = std.Io.Writer.Allocating.init(b.allocator);
-    defer aw.deinit();
+    var alloc_writer = std.Io.Writer.Allocating.init(allocator);
+    defer alloc_writer.deinit();
 
-    const w = &aw.writer;
-    try w.writeAll("// Auto-generated - do not edit\ntest {\n");
-    for (files) |f| {
-        try w.print("    _ = @import(\"{s}\");\n", .{f});
-    }
-    try w.writeAll("}\n");
+    const writer = &alloc_writer.writer;
+    try writer.writeAll("test {\n");
+    for (source_files) |f|
+        try writer.print("    _ = @import(\"{s}\");\n", .{f});
+    try writer.writeAll("}\n");
 
-    const wf = b.addWriteFiles();
-    _ = wf.addCopyDirectory(b.path(src_dir), src_dir, .{});
-    return wf.add("auto_test_runner.zig", aw.written());
+    const write_files = b.addWriteFiles();
+    return write_files.add("auto_test_runner.zig", alloc_writer.written());
 }
 
-fn collect_files(b: *std.Build, dir: []const u8) ![]const []const u8 {
-    const gpa = b.allocator;
-    var files: std.ArrayList([]const u8) = .empty;
+fn collect_source_files(b: *std.Build, dir: []const u8) ![]const []const u8 {
+    const allocator = b.allocator;
+    var source_files = std.ArrayList([]const u8).empty;
+    var dirs = std.ArrayList([]const u8).empty;
+    try dirs.append(allocator, dir);
+    var i: usize = 0;
 
-    var dirs_to_visit: std.ArrayList([]const u8) = .empty;
-    defer dirs_to_visit.deinit(gpa);
-    try dirs_to_visit.append(gpa, dir);
+    while (i < dirs.items.len) : (i += 1) {
+        const current = dirs.items[i];
+        const absolute = try std.fs.path.join(allocator, &.{ b.build_root.path orelse ".", current });
+        defer allocator.free(absolute);
 
-    while (dirs_to_visit.items.len > 0) {
-        const current = dirs_to_visit.orderedRemove(0);
-        const root = b.build_root.path orelse ".";
-        const full = try std.fs.path.join(gpa, &.{ root, current });
-        defer gpa.free(full);
-
-        var d = std.Io.Dir.openDirAbsolute(b.graph.io, full, .{ .iterate = true }) catch |e| {
-            switch (e) {
-                error.FileNotFound => continue,
-                else => return e,
-            }
+        var d = std.Io.Dir.openDirAbsolute(b.graph.io, absolute, .{ .iterate = true }) catch |e| switch (e) {
+            error.FileNotFound => continue,
+            else => |err| return err,
         };
         defer d.close(b.graph.io);
 
         var it = d.iterate();
-        while (try it.next(b.graph.io)) |e| {
-            if (e.name[0] == '.') continue;
-            if (e.kind == .file and std.mem.endsWith(u8, e.name, ".zig")) {
-                try files.append(gpa, try std.fs.path.join(gpa, &.{ current, e.name }));
-            } else if (e.kind == .directory and
-                !std.mem.startsWith(u8, e.name, "zig-cache") and
-                !std.mem.startsWith(u8, e.name, "zig-pkg"))
+        while (try it.next(b.graph.io)) |entry| {
+            if (entry.name[0] == '.') continue;
+            const joined = try std.fs.path.join(allocator, &.{ current, entry.name });
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".zig")) {
+                try source_files.append(allocator, joined);
+            } else if (entry.kind == .directory and
+                !std.mem.startsWith(u8, entry.name, "zig-cache") and
+                !std.mem.startsWith(u8, entry.name, "zig-pkg"))
             {
-                try dirs_to_visit.append(gpa, try std.fs.path.join(gpa, &.{ current, e.name }));
+                try dirs.append(allocator, joined);
             }
         }
     }
-
-    return files.items;
+    return source_files.items;
 }
