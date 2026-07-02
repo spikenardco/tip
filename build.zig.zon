@@ -1,11 +1,12 @@
 .{
     .name = .tip,
-    .version = "0.0.0-alpha-2",
+    .version = "0.0.0-alpha-3",
     .fingerprint = 0x4883b84ca584213a, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .flags = .{
-            .path = "../flags.zig",
+            .url = "git+https://github.com/spikenardco/flags.zig#c9bed6ea8d7e78ee9c5e0d6f8ff439818bc0dee4",
+            .hash = "flags-0.1.0-GjWK4jrRAACRPY5KNApF18d_0c1z8OKHc1QlGqC9bcv_",
         },
     },
     .paths = .{
