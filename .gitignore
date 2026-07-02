@@ -11,4 +11,5 @@ zig-pkg/
 
 .zig-cache/
 zig-out/
+auto_test_runner.zig
 *.o

@@ -42,14 +42,14 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "Run the app").dependOn(&run_cmd.step);
 
-    const test_runner = create_test_runner(b, "src") catch |err| {
-        std.log.err("Failed to generate test runner: {}", .{err});
+    const test_entry = generate_test_entry(b, "src") catch |err| {
+        std.log.err("Failed to generate test entry: {}", .{err});
         return;
     };
 
     const all_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = test_runner,
+            .root_source_file = test_entry,
             .target = target,
             .optimize = optimize,
         }),
@@ -58,9 +58,9 @@ pub fn build(b: *std.Build) void {
     b.step("test", "Run all tests").dependOn(&b.addRunArtifact(all_tests).step);
 }
 
-fn create_test_runner(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath {
+fn generate_test_entry(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath {
     const allocator = b.allocator;
-    const source_files = try collect_source_files(b, src_dir);
+    const source_files = try find_zig_sources(b, src_dir);
 
     var alloc_writer = std.Io.Writer.Allocating.init(allocator);
     defer alloc_writer.deinit();
@@ -71,11 +71,15 @@ fn create_test_runner(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath {
         try writer.print("    _ = @import(\"{s}\");\n", .{f});
     try writer.writeAll("}\n");
 
-    const write_files = b.addWriteFiles();
-    return write_files.add("auto_test_runner.zig", alloc_writer.written());
+    const build_root_path = b.build_root.path orelse ".";
+    var dir = try std.Io.Dir.openDirAbsolute(b.graph.io, build_root_path, .{});
+    defer dir.close(b.graph.io);
+    try dir.writeFile(b.graph.io, .{ .sub_path = "auto_test_runner.zig", .data = alloc_writer.written() });
+
+    return b.path("auto_test_runner.zig");
 }
 
-fn collect_source_files(b: *std.Build, dir: []const u8) ![]const []const u8 {
+fn find_zig_sources(b: *std.Build, dir: []const u8) ![]const []const u8 {
     const allocator = b.allocator;
     var source_files = std.ArrayList([]const u8).empty;
     var dirs = std.ArrayList([]const u8).empty;
@@ -84,10 +88,10 @@ fn collect_source_files(b: *std.Build, dir: []const u8) ![]const []const u8 {
 
     while (i < dirs.items.len) : (i += 1) {
         const current = dirs.items[i];
-        const absolute = try std.fs.path.join(allocator, &.{ b.build_root.path orelse ".", current });
-        defer allocator.free(absolute);
+        const absolute_path = try std.fs.path.join(allocator, &.{ b.build_root.path orelse ".", current });
+        defer allocator.free(absolute_path);
 
-        var d = std.Io.Dir.openDirAbsolute(b.graph.io, absolute, .{ .iterate = true }) catch |e| switch (e) {
+        var d = std.Io.Dir.openDirAbsolute(b.graph.io, absolute_path, .{ .iterate = true }) catch |e| switch (e) {
             error.FileNotFound => continue,
             else => |err| return err,
         };
