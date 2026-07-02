@@ -22,8 +22,10 @@ pub fn build(b: *std.Build) void {
             b.fmt("pub const version = \"{s}\";\n", .{manifest.version})),
     });
 
+    const exe_name = b.option([]const u8, "exe-name", "Custom executable name") orelse "tip";
+
     const exe = b.addExecutable(.{
-        .name = "tip",
+        .name = exe_name,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
