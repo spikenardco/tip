@@ -3,7 +3,11 @@
 > **Status:** DRAFT / in-progress brainstorm. Design only — **no implementation yet.**
 > **Date started:** 2026-06-30
 > **Resume point:** Sub-project **00 (Naming & Conventions Charter)** is **DONE** (charter
-> finalized below, §6). Next up: sub-project **01 (ID strategy + error taxonomy)**.
+> finalized below, §6); its renames are already applied in code. Sub-project **01 (ID strategy +
+> error taxonomy)** design is **DONE** — see
+> [2026-07-02-01-id-strategy-error-taxonomy-design.md](2026-07-02-01-id-strategy-error-taxonomy-design.md)
+> (decisions E1–E8). Next up: write the 01 checkbox implementation plan, then sub-project
+> **02 (SQLite foundation)**.
 > See [Open Questions](#open-questions--resume-here) at the bottom.
 
 This file captures **everything** discussed so far so nothing is lost: the product vision,

@@ -13,23 +13,21 @@ pub fn open_data_dir(
     io: std.Io,
     environ: std.process.Environ,
 ) !std.Io.Dir {
-    var env_map = try std.process.Environ.createMap(environ, allocator);
-    defer env_map.deinit();
-
     const base = switch (builtin.os.tag) {
         .linux => blk: {
-            if (env_map.get("XDG_DATA_HOME")) |xdg| {
+            if (environ.getPosix("XDG_DATA_HOME")) |xdg| {
                 break :blk try std.fs.path.join(allocator, &.{ xdg, "tip" });
             }
-            const home = env_map.get("HOME") orelse return error.HomeDirMissing;
+            const home = environ.getPosix("HOME") orelse return error.HomeDirMissing;
             break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "tip" });
         },
         .macos => blk: {
-            const home = env_map.get("HOME") orelse return error.HomeDirMissing;
+            const home = environ.getPosix("HOME") orelse return error.HomeDirMissing;
             break :blk try std.fs.path.join(allocator, &.{ home, "Library", "Application Support", "tip" });
         },
         .windows => blk: {
-            const appdata = env_map.get("APPDATA") orelse return error.AppDataDirUnavailable;
+            const appdata = environ.getAlloc(allocator, "APPDATA") catch return error.AppDataDirUnavailable;
+            defer allocator.free(appdata);
             break :blk try std.fs.path.join(allocator, &.{ appdata, "tip" });
         },
         else => @compileError("unsupported OS"),

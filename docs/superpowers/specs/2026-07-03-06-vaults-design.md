@@ -1,0 +1,311 @@
+# Sub-project 06 — Vaults (DESIGN)
+
+> **Status:** DESIGN APPROVED
+> **Date:** 2026-07-03
+> **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
+> **Predecessor:** Sub-project 05 (Config system + global flags)
+> **Successor:** 07 (Export/Import)
+
+This sub-project introduces vaults as a first-class user concept (e.g. `work` / `personal` /
+`finance`). It adds a `vaults` table, a `vault_id` foreign key on `tasks`, a full `tip vault`
+command surface, single-task `task move`, and wires the active-vault selection (`--vault` flag +
+`config.default_vault`) into the storage handle. The 03 `Vault` handle is renamed to `Store`, and
+"a vault" becomes a selected context inside the store.
+
+---
+
+## Locked decisions
+
+| # | Decision | Status |
+|---|----------|--------|
+| 06-1 | **Storage architecture:** one `tip.db`, a `vaults` table, and a `vault_id` FK on `tasks`. Switching vaults changes which `vault_id` is filtered. (Not one-file-per-vault.) | LOCKED |
+| 06-2 | **Handle rename:** 03's `Vault` handle becomes `Store`. `store.tasks` is auto-scoped to the active vault; `store.vaults` does vault-registry CRUD. | LOCKED |
+| 06-3 | **Vault identity:** `vaults.id TEXT PK` (ULID) + `vaults.name TEXT UNIQUE`. `tasks.vault_id` FK → `vaults.id`. Name is a cheap, mutable label. | LOCKED |
+| 06-4 | **Rename + move/merge in scope.** `vault rename` (relabel), `task move` (single task), `vault merge` (bulk) are all part of 06. | LOCKED |
+| 06-5 | **Create verb: `vault add`** (consistent with `task add`). **Supersedes charter D10** which had `vault init`. | LOCKED |
+| 06-6 | **`move` placement:** single-task move is `task move <id> --to=<vault>`; bulk is `vault merge <src> --into=<dst>`. No duplicate `vault move`. | LOCKED |
+| 06-7 | **Default vault:** migration seeds a `personal` vault and backfills existing tasks to it. `vault_id` is `NOT NULL` — a task always belongs to exactly one vault. | LOCKED |
+| 06-8 | **Active vault = `config.default_vault`.** No separate state file (for now). `vault switch` = validated `config set default_vault`. `--vault` overrides one command only. Precedence: `--vault` > `config.default_vault` > `"personal"`. | LOCKED |
+| 06-9 | **Delete semantics:** refuse if non-empty (suggest `vault merge` or `--force` to cascade). Refuse to delete the last remaining vault or the currently-active vault. | LOCKED |
+| 06-10 | **Vault metadata is minimal:** `id`, `name`, `created_at` only. `description`/`color`/`icon`/crypto params deferred (they hang off the stable `id`). | LOCKED |
+
+---
+
+## Part A — Why one db + rows (not one file per vault)
+
+| Approach | Trade-off |
+|----------|-----------|
+| **A (chosen): one `tip.db`, `vaults` table + `tasks.vault_id` FK** | Smallest step from 03. Single migration path. Cross-vault ops (list-all, stats) stay trivial. Per-vault encryption later (10/11) done with app-level encrypted columns keyed per vault. |
+| B: one SQLite file per vault (`vaults/personal.db`, `work.db`) | Maps cleanly onto per-vault master passwords, but no cross-vault queries and more file management. Revisit only if crypto forces it — a contained migration. |
+| C: hybrid registry db + per-vault data files | Most moving parts; not justified now. |
+
+If sub-project 10 later proves separate files are essential for crypto, moving from A to B is a
+contained migration; A does not paint us into a corner.
+
+---
+
+## Part B — Vault identity (id vs name)
+
+Chosen: **ULID id PK + unique name label** (06-3). The deciding factor is how the two realistic
+"I got the name wrong / want to reorganize" scenarios play out:
+
+| Scenario | id-PK + name label (chosen) | name-as-PK (rejected) |
+|---|---|---|
+| Typo'd name, vault empty | rename or delete+recreate, trivial | trivial |
+| Typo'd name, tasks already added | `vault rename` = one-row `UPDATE vaults SET name=?`; tasks untouched (they point at id) | must cascade-update `vault_id` on every task, or disallow rename |
+| Move/merge tasks between vaults | explicit `UPDATE tasks SET vault_id=? WHERE vault_id=?` | same query but muddied by name mutation |
+| Reuse a name after delete | new vault gets fresh id; no silent reattach | reused name → stray rows silently reattach (footgun) |
+| Attach metadata later | hangs off stable id | keyed by mutable name; fragile |
+
+Renaming (fix a typo) and moving tasks (reorganize) are **separate operations**, both cheap under
+the chosen model: `vault rename` is a one-row update, `task move`/`vault merge` are deliberate
+reorganizations.
+
+---
+
+## Part C — Schema
+
+### `003_create_vaults.sql`
+
+```sql
+CREATE TABLE IF NOT EXISTS vaults (
+    id         TEXT PRIMARY KEY NOT NULL,   -- ULID
+    name       TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+```
+
+### Tasks FK migration (same `003`)
+
+SQLite cannot add a `NOT NULL` foreign-key column to a populated table in a single `ALTER TABLE`.
+The migration therefore rebuilds `tasks`:
+
+```sql
+-- 1. seed the default vault (ULID generated by the migration runner or a fixed bootstrap id)
+INSERT OR IGNORE INTO vaults (id, name, created_at) VALUES (:personal_id, 'personal', :now);
+
+-- 2. new tasks table with the FK
+CREATE TABLE tasks_new (
+    id           TEXT PRIMARY KEY NOT NULL,
+    vault_id     TEXT NOT NULL REFERENCES vaults(id),
+    title        TEXT NOT NULL,
+    description  TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    priority     TEXT,
+    due_date     INTEGER,
+    assigned_to  TEXT,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER,
+    completed_at INTEGER
+);
+
+-- 3. copy existing rows, backfilling every task into 'personal'
+INSERT INTO tasks_new
+SELECT id, :personal_id, title, description, status, priority,
+       due_date, assigned_to, created_at, updated_at, completed_at
+FROM tasks;
+
+-- 4. swap
+DROP TABLE tasks;
+ALTER TABLE tasks_new RENAME TO tasks;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_vault ON tasks(vault_id);
+
+INSERT OR IGNORE INTO _schema_version (version) VALUES (3);
+```
+
+> **Note on the `personal` id:** the migration needs a concrete ULID for the seed vault. Options:
+> the migration runner supplies a generated ULID as a bind param (`:personal_id`), or a fixed
+> bootstrap ULID constant is used. Decide during plan/implementation; the runner-supplied param is
+> preferred so it's a real time-ordered ULID.
+
+**`PRAGMA foreign_keys = ON`** must be issued on every connection open (SQLite defaults it off),
+added to `db.open` from sub-project 02.
+
+---
+
+## Part D — `Store` handle API
+
+Renames 03's `Vault` → `Store`. `store.tasks` is auto-scoped to the active vault resolved at
+`open`; `store.vaults` is the unscoped registry handle.
+
+```zig
+pub const Store = struct {
+    db: *sqlite.Db,
+    io: std.Io,
+    active_vault_id: []const u8,   // resolved at open from options/config
+    tasks: Tasks,
+    vaults: Vaults,
+
+    pub const OpenOptions = struct {
+        vault: ?[]const u8 = null,          // --vault one-shot override (name)
+        default_vault: []const u8 = "personal", // from config.default_vault
+    };
+
+    pub fn open(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Environ, opts: OpenOptions) !Store
+    pub fn close(self: *Store) void
+
+    pub const Tasks = struct {
+        store: *Store,
+        // all scoped to store.active_vault_id
+        pub fn add(self: *Tasks, args: AddFields) !models.Task
+        pub fn list(self: *Tasks, allocator: std.mem.Allocator) ![]models.Task
+        pub fn get_by_id(self: *Tasks, allocator: std.mem.Allocator, id: []const u8) !models.Task
+        pub fn edit(self: *Tasks, id: []const u8, fields: EditFields) !void
+        pub fn delete(self: *Tasks, id: []const u8) !void
+        pub fn complete(self: *Tasks, id: []const u8) !void
+        pub fn start(self: *Tasks, id: []const u8) !void
+        pub fn move(self: *Tasks, id: []const u8, to_vault_id: []const u8) !void  // NEW
+    };
+
+    pub const Vaults = struct {
+        store: *Store,
+        pub fn add(self: *Vaults, name: []const u8) !models.Vault
+        pub fn list(self: *Vaults, allocator: std.mem.Allocator) ![]models.Vault
+        pub fn get_by_name(self: *Vaults, allocator: std.mem.Allocator, name: []const u8) !models.Vault
+        pub fn rename(self: *Vaults, old_name: []const u8, new_name: []const u8) !void
+        pub fn merge(self: *Vaults, src_name: []const u8, dst_name: []const u8, delete_src: bool) !void
+        pub fn delete(self: *Vaults, name: []const u8, force: bool) !void
+        pub fn count_tasks(self: *Vaults, vault_id: []const u8) !usize
+    };
+};
+```
+
+### Resolution and scoping notes
+
+- **`open`**: resolves the active vault name (`opts.vault orelse opts.default_vault`), looks up its
+  id via `vaults.get_by_name`, stores `active_vault_id`. Unknown name → `VaultNotFound` (fails
+  loudly; never silently creates/uses the wrong vault).
+- **Task ops**: every `store.tasks.*` query includes `AND vault_id = active_vault_id`. Tasks in
+  other vaults are invisible to the active context.
+- **`tasks.move`**: `UPDATE tasks SET vault_id = ? WHERE id = ? AND vault_id = active_vault_id`.
+  The `to_vault_id` is resolved from `--to=<name>` at the CLI layer.
+- **`vaults.rename`**: `UPDATE vaults SET name=? WHERE name=?`; task rows never touched.
+- **`vaults.merge`**: `UPDATE tasks SET vault_id=dst WHERE vault_id=src`, then optionally delete src.
+- **`vaults.delete`**: enforces 06-9 guards (see Part F).
+
+`Task` and the new `Vault` model struct live in `models.zig`. Handle methods return data; CLI owns
+rendering (03 S6 carried forward).
+
+---
+
+## Part E — Command surface
+
+| Command | Purpose | Notes |
+|---|---|---|
+| `vault add <name>` | Create a vault | `VaultNameExists` on duplicate |
+| `vault list` | List all vaults | Active/default marked with `*` |
+| `vault show <name>` | Show one vault's metadata + task count | Read verb per charter |
+| `vault switch <name>` | Set the active/default vault | Validated `config set default_vault` |
+| `vault rename <old> <new>` | Relabel | One-row update; tasks untouched |
+| `vault merge <src> --into=<dst>` | Move all tasks src → dst | `--delete` also removes src after |
+| `vault delete <name>` | Delete a vault | Guards in Part F |
+| `task move <id> --to=<vault>` | Move a single task to another vault | `id` supports prefix match |
+
+---
+
+## Part F — Deletion semantics
+
+`vault delete <name>`:
+
+1. **Non-empty vault:** without `--force`, error `VaultNotEmpty` →
+   "Vault '<name>' has N tasks; move them with `vault merge` or pass `--force` to delete them."
+   With `--force`, cascade-delete the vault's tasks then the vault.
+2. **Last remaining vault:** always refuse (`CannotDeleteLastVault`) — there must be ≥1 vault.
+3. **Currently-active vault:** refuse (`CannotDeleteActiveVault`) — switch away first, so the
+   active-vault resolution always has a valid target.
+
+Destructive loss is always deliberate: the safe path (`vault merge`) is surfaced in the error.
+
+---
+
+## Part G — Config integration
+
+- **`vault switch <name>`** validates the vault exists, then writes `config.default_vault` via the
+  05 `config set` machinery. `config show` reflects the current active vault.
+- **`--vault=<name>`** (05 flag) overrides for a single command; never written to disk.
+- **Precedence:** `--vault` flag > `config.default_vault` > hardcoded `"personal"`.
+
+> **Deferred — `state.zon`:** a future option is to split "current position" (active vault,
+> last-used, sync cursors) into a machine-local `state.zon`, distinct from user-owned `tip.zon`
+> config (cf. git's `.gitconfig` vs `.git/HEAD`). This would stop `vault switch` from churning the
+> settings file and give a cleaner preference-vs-position boundary. Skipped for now (one extra file
+> + precedence layer with little gain at single-user CLI scale); revisit when a second
+> "position, not preference" value appears. `vault switch` would then write state instead of config.
+
+---
+
+## Part H — Errors (extends sub-project 01 taxonomy)
+
+| Error | Raised when |
+|---|---|
+| `VaultNotFound` | `--vault`/switch/show/rename/merge target name doesn't exist |
+| `VaultNameExists` | `add`/`rename` to a name already in use |
+| `VaultNotEmpty` | `delete` on a non-empty vault without `--force` |
+| `CannotDeleteLastVault` | `delete` on the only remaining vault |
+| `CannotDeleteActiveVault` | `delete` on the currently-active vault |
+
+Prefix-match / ambiguity for `task move <id>` reuse the sub-project 04 helper (`AmbiguousPrefix`,
+`TaskNotFound`).
+
+---
+
+## Part I — File layout (changes)
+
+| File | Change |
+|---|---|
+| `src/core/vault.zig` → `src/core/store.zig` | Rename; `Store` handle, `Tasks` (scoped) + `Vaults` handles |
+| `src/core/models.zig` | Add `Vault` struct (`id`, `name`, `created_at`) |
+| `src/core/task.zig` | `task move` subcommand; task ops go through `store.tasks` |
+| `src/core/config.zig` | `vault switch` reuses `config set default_vault` |
+| `src/core/errors.zig` | Add vault error members (Part H) |
+| `src/main.zig` | `vault` command variants; `task move`; wire `--vault` into `Store.open` |
+| `src/internal/database/db.zig` | `PRAGMA foreign_keys = ON` on open |
+| `src/internal/database/migrations/003_create_vaults.sql` | NEW (vaults table + tasks FK rebuild + backfill) |
+
+---
+
+## Part J — Testing (in-memory sqlite `:memory:`)
+
+| Test | Verifies |
+|------|----------|
+| add + list vaults | create, list includes it, active marked |
+| add duplicate name | `VaultNameExists` |
+| rename | one-row update; tasks untouched; task counts unchanged |
+| rename to existing name | `VaultNameExists` |
+| tasks scoped to active vault | tasks in vault A invisible when active vault is B |
+| `task move` | task's `vault_id` changes; leaves src, appears in dst |
+| merge | all src tasks move to dst; `--delete` removes src |
+| delete non-empty (no force) | `VaultNotEmpty` |
+| delete non-empty (`--force`) | vault + its tasks removed |
+| delete last vault | `CannotDeleteLastVault` |
+| delete active vault | `CannotDeleteActiveVault` |
+| `--vault` override | one-shot scope beats config default |
+| unknown `--vault` | `VaultNotFound` |
+| migration 003 backfill | pre-existing tasks all land in `personal`; FK enforced |
+
+---
+
+## Out of scope
+
+- **Vault metadata beyond name** (`description`, `color`, `icon`) — future.
+- **Per-vault encryption / master passwords** — sub-projects 10/11.
+- **`state.zon`** position/preference split — deferred (Part G note).
+- **Export/import** — sub-project 07.
+- **Remote / sync** of vaults — sub-project 17+.
+
+---
+
+## Doc housekeeping (apply when spec is accepted)
+
+- **Charter change:** update draft §2 D10 and §6 flag rules — the vault create verb is **`vault add`**,
+  not `vault init` (06-5).
+- Record the deferred **`state.zon`** option in the draft's open-questions/notes if useful.
+
+---
+
+## Next step
+
+Write the checkbox implementation plan for this sub-project via the writing-plans skill. **No
+implementation yet.**
