@@ -22,31 +22,62 @@ zig build test --summary all
 
 ## Installation
 
-### Download a release
+### Quick install
 
-Grab the archive for your platform from the [releases page](https://github.com/spikenardco/tip/releases), then extract it. The binary inside is named `tip` and is already executable.
+**macOS / Linux:**
 
 ```bash
-# macOS / Linux (example: Apple Silicon)
-tar -xzf tip-macos-arm64.tar.gz
-./tip-macos-arm64/tip --version
+curl -fsSL https://raw.githubusercontent.com/spikenardco/tip/main/scripts/install.sh | sh
 ```
 
-On Windows, extract `tip-windows-x86_64.zip` and run `tip.exe`.
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/spikenardco/tip/main/scripts/install.ps1 | iex
+```
+
+The installer downloads the right binary for your platform, verifies its
+checksum, and installs `tip` to `~/.local/bin` (macOS/Linux) or
+`%LOCALAPPDATA%\tip\bin` (Windows). Set `TIP_VERSION=vX.Y.Z` to pin a version.
+
+### Manual download
+
+Grab the binary for your platform from the
+[releases page](https://github.com/spikenardco/tip/releases):
+
+| Platform | File |
+| --- | --- |
+| macOS (Apple Silicon) | `tip-macos-arm64` |
+| macOS (Intel) | `tip-macos-x86_64` |
+| Linux (x86_64) | `tip-linux-x86_64` |
+| Linux (ARM64) | `tip-linux-arm64` |
+| Windows (x86_64) | `tip-windows-x86_64.exe` |
+
+Make it executable and run it:
+
+```bash
+chmod +x tip-macos-arm64
+./tip-macos-arm64 --version
+```
 
 Verify a download against `checksums.txt`:
 
 ```bash
-sha256sum -c checksums.txt
+sha256sum -c checksums.txt      # or: shasum -a 256 -c checksums.txt
 ```
 
-#### macOS: first launch
+#### macOS: browser downloads only
 
-macOS may show an "unidentified developer" warning for a downloaded binary. It is safe to run — either **right-click the binary → Open** once, or clear the quarantine flag:
+If you download the binary in a **browser**, macOS may show an "unidentified
+developer" warning. Either right-click the binary → **Open** once, or clear the
+quarantine flag:
 
 ```bash
-xattr -d com.apple.quarantine ./tip
+xattr -d com.apple.quarantine ./tip-macos-arm64
 ```
+
+The quick-install script above avoids this entirely — files fetched with `curl`
+are not quarantined.
 
 ### Build from source
 
