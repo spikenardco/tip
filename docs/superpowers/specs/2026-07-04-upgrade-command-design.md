@@ -185,8 +185,8 @@ The version string is already injected at build time via the `version` module.
 - **No checksums.txt for the release:** If checksums.txt is missing, we skip
   verification and print a warning.
 - **HEAD request returns non-302:** If the download URL returns 200 (no redirect),
-  there's no tag to parse. We fall back to downloading and checking the version
-  of the downloaded binary via a subprocess call (`tip --version`).
+  there's no tag to parse. We print an error and exit — we never download a
+  binary just to discover its version.
 
 ## Testing
 
