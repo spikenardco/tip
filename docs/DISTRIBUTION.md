@@ -95,8 +95,8 @@ placing it on `PATH`. (This restores the pre-packaging behavior; the folder +
 
 ## To do
 
-- [ ] Revert release/prerelease workflows to publish raw arch-named binaries
+- [x] Revert release/prerelease workflows to publish raw arch-named binaries
       (drop the folder + tar/zip packaging step).
-- [ ] Add `scripts/install.sh` (macOS/Linux).
-- [ ] Add `scripts/install.ps1` (Windows).
-- [ ] Update README with the quick-install one-liners + manual-download section.
+- [x] Add `scripts/install.sh` (macOS/Linux).
+- [x] Add `scripts/install.ps1` (Windows).
+- [x] Update README with the quick-install one-liners + manual-download section.
