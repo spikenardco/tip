@@ -18,8 +18,7 @@ pub fn build(b: *std.Build) void {
     ) catch @panic("bad zon");
 
     const version_module = b.createModule(.{
-        .root_source_file = b.addWriteFiles().add("version.zig",
-            b.fmt("pub const version = \"{s}\";\n", .{manifest.version})),
+        .root_source_file = b.addWriteFiles().add("version.zig", b.fmt("pub const version = \"{s}\";\n", .{manifest.version})),
     });
 
     const exe_name = b.option([]const u8, "exe-name", "Custom executable name") orelse "tip";
@@ -37,6 +36,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    exe.root_module.strip = optimize != .Debug;
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
