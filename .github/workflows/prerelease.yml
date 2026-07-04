@@ -65,23 +65,10 @@ jobs:
       - name: Build Linux ARM64
         run: zig build -Dtarget=aarch64-linux -Doptimize=ReleaseSafe -Dexe-name=tip-linux-arm64
 
-      - name: Package
+      - name: Generate checksums
         run: |
           cd ./zig-out/bin
-          mkdir -p dist
-          chmod +x tip-macos-x86_64 tip-macos-arm64 tip-linux-x86_64 tip-linux-arm64
-          for t in macos-x86_64 macos-arm64 linux-x86_64 linux-arm64; do
-            mkdir -p "dist/tip-$t"
-            cp "tip-$t" "dist/tip-$t/tip"
-            cp ../../LICENSE "dist/tip-$t/"
-            tar -C dist -czf "dist/tip-$t.tar.gz" "tip-$t"
-          done
-          mkdir -p dist/tip-windows-x86_64
-          cp tip-windows-x86_64.exe dist/tip-windows-x86_64/tip.exe
-          cp ../../LICENSE dist/tip-windows-x86_64/
-          (cd dist && zip -r tip-windows-x86_64.zip tip-windows-x86_64)
-          cd dist
-          sha256sum tip-macos-x86_64.tar.gz tip-macos-arm64.tar.gz tip-linux-x86_64.tar.gz tip-linux-arm64.tar.gz tip-windows-x86_64.zip > checksums.txt
+          sha256sum tip-windows-x86_64.exe tip-macos-x86_64 tip-macos-arm64 tip-linux-x86_64 tip-linux-arm64 > checksums.txt
 
       - name: Delete existing prerelease tag
         run: gh release delete nightly --cleanup-tag --yes || true
@@ -98,10 +85,10 @@ jobs:
             Automated prerelease from main branch.
             Commit: ${{ github.sha }}
           files: |
-            ./zig-out/bin/dist/tip-macos-x86_64.tar.gz
-            ./zig-out/bin/dist/tip-macos-arm64.tar.gz
-            ./zig-out/bin/dist/tip-linux-x86_64.tar.gz
-            ./zig-out/bin/dist/tip-linux-arm64.tar.gz
-            ./zig-out/bin/dist/tip-windows-x86_64.zip
-            ./zig-out/bin/dist/checksums.txt
+            ./zig-out/bin/tip-windows-x86_64.exe
+            ./zig-out/bin/tip-macos-x86_64
+            ./zig-out/bin/tip-macos-arm64
+            ./zig-out/bin/tip-linux-x86_64
+            ./zig-out/bin/tip-linux-arm64
+            ./zig-out/bin/checksums.txt
             LICENSE
