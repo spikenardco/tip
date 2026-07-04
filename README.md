@@ -30,15 +30,9 @@ zig build test --summary all
 curl -fsSL https://raw.githubusercontent.com/spikenardco/tip/main/scripts/install.sh | sh
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-irm https://raw.githubusercontent.com/spikenardco/tip/main/scripts/install.ps1 | iex
-```
-
 The installer downloads the right binary for your platform, verifies its
-checksum, and installs `tip` to `~/.local/bin` (macOS/Linux) or
-`%LOCALAPPDATA%\tip\bin` (Windows). Set `TIP_VERSION=vX.Y.Z` to pin a version.
+checksum, and installs `tip` to `~/.local/bin`. Set `TIP_VERSION=vX.Y.Z`
+to pin a version.
 
 ### Manual download
 
