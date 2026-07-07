@@ -2,24 +2,6 @@
 
 A task manager built with Zig.
 
-## Quick Start
-
-```bash
-# Add a task
-tip task add --title="Review code" --desc="Review PR #42"
-
-# List tasks
-tip task --list
-
-# Run tests
-zig build test --summary all
-```
-
-## Documentation
-
-- **[Roadmap](docs/ROADMAP.md)** - Development timeline and milestones
-- **[Architecture](docs/ARCHITECTURE.md)** - System design and technical details
-
 ## Installation
 
 ### Quick install
@@ -30,9 +12,20 @@ zig build test --summary all
 curl -fsSL https://raw.githubusercontent.com/spikenardco/tip/main/scripts/install.sh | sh
 ```
 
+**Windows (Git Bash / WSL):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/spikenardco/tip/main/scripts/install.sh | sh
+```
+
 The installer downloads the right binary for your platform, verifies its
-checksum, and installs `tip` to `~/.local/bin`. Set `TIP_VERSION=vX.Y.Z`
-to pin a version.
+integrity against `checksums.txt`, and installs `tip` to `~/.local/bin`
+(macOS/Linux) or `$HOME/AppData/Local/tip/bin` (Windows Git Bash).
+Set `TIP_VERSION=vX.Y.Z` to pin a version.
+
+**Windows (PowerShell):** Use [Git Bash](https://git-scm.com) or
+[WSL](https://learn.microsoft.com/en-us/windows/wsl/install) to run the shell
+installer above, or download the binary manually (see below).
 
 ### Manual download
 
@@ -62,16 +55,16 @@ sha256sum -c checksums.txt      # or: shasum -a 256 -c checksums.txt
 
 #### macOS: browser downloads only
 
-If you download the binary in a **browser**, macOS may show an "unidentified
-developer" warning. Either right-click the binary → **Open** once, or clear the
+If you download the binary in a browser, macOS may show an "unidentified
+developer" warning. Right-click the binary and choose Open, or clear the
 quarantine flag:
 
 ```bash
 xattr -d com.apple.quarantine ./tip-macos-arm64
 ```
 
-The quick-install script above avoids this entirely — files fetched with `curl`
-are not quarantined.
+The quick-install script avoids this, since files fetched with `curl` are not
+quarantined.
 
 ### Build from source
 
@@ -80,6 +73,24 @@ git clone https://github.com/spikenardco/tip
 cd tip
 zig build
 ```
+
+## Quick Start
+
+```bash
+# Verify installation
+tip --version
+
+# Add a task
+tip task add --title="Review code" --desc="Review PR #42"
+
+# List tasks
+tip task --list
+```
+
+## Documentation
+
+- **[Roadmap](docs/ROADMAP.md)** - Development timeline and milestones
+- **[Architecture](docs/ARCHITECTURE.md)** - System design and technical details
 
 ## Development
 
