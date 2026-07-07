@@ -32,6 +32,9 @@ jobs:
       - name: Test
         run: zig build test --summary all
 
+      - name: Installer smoke test
+        run: sh scripts/test-install.sh
+
   prerelease:
     name: Prerelease
     needs: test
