@@ -147,7 +147,7 @@ Implemented as a new command variant in `main.zig` `Args.command`:
 - **Vaults** (multi-vault, vault FK, `--vault` behavior) — sub-project 06.
 - **Mode switching** (`--mode=remote`) — sub-project 17+.
 - **JSON export/import** — future sub-project.
-- **SSO / secrets in config** — future sub-project 10+.
+- **SSO / secrets in config** — future sub-project.
 - **Config validation** (schema checks beyond struct typing) — future.
 
 ---

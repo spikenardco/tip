@@ -4,7 +4,7 @@
 > **Date:** 2026-07-04
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 07 (Export/Import)
-> **Successor:** 09 (Tags + categories + custom fields)
+> **Successor:** 09 (Tags & categories)
 
 This sub-project adds filtered listing, full-text search, and basic statistics to the
 task manager. Filters, search, and stats share a common `TaskQuery` engine and are

@@ -81,7 +81,7 @@ ROADMAP.md, SERVER_API.md, ZIG_IMPLEMENTATION_GUIDE.md (2532 lines).
 
 ### All sub-project 00 questions resolved
 Nothing left open in the naming charter. Remaining open items live in later sub-projects
-(ID format in 01, crypto/SQLite interaction in 10, key-session model in 11).
+(ID format in 01, crypto/SQLite interaction in the crypto sub-project, key-session model thereafter).
 
 ---
 
@@ -103,7 +103,7 @@ non-core until the foundation ships.
    - (a) **SQLCipher** — whole-db encryption, needs a special C build.
    - (b) **App-level encrypted BLOB columns** — metadata leaks (row counts, timestamps, names).
    - (c) **Encrypt everything as one blob** — defeats the point of SQLite.
-   Undecided; it shapes the entire schema. (Tracked in sub-project 10.)
+   Undecided; it shapes the entire schema. (Tracked in the crypto sub-project.)
 3. **ID strategy is contradictory.** Docs show `--id=1` (integers); code generates time+random
    hex that **isn't a real UUID** (function misnamed `uuid`). Pick one: SQLite `rowid`, **ULID**,
    or **UUIDv7** (time-sortable). Touches every table + command. (Sub-project 01.)
@@ -245,18 +245,19 @@ DATA & UX
  06  Vaults (table, FK, vault cmds, --vault selection, default)
  07  Export/Import (JSON + CSV, atomic, merge, dry-run)
  08  Task filters/search/stats (FTS, list filters)
- 09  Tags + categories + custom fields (shared model)
+  09  Tags & categories
+  (Custom fields — dropped from roadmap)
 
 SECURITY (the hard middle)
- 10  Crypto core: AES-256-GCM + Argon2id + encrypted columns
- 11  Key-session model: unlock/lock/auto-lock across processes
+  10  Crypto core: AES-256-GCM + Argon2id + encrypted columns
+  11  Key-session model: unlock/lock/auto-lock across processes
 
 PASSWORDS
- 12  Password CRUD + history (5 versions)
- 13  Password generation (lengths/passphrase/charsets)
- 14  Strength + audit (weak/duplicate/age)
- 15  Clipboard copy w/ timeout
- 16  Breach check (HIBP k-anonymity)
+  12  Password CRUD + history (5 versions)
+  13  Password generation (lengths/passphrase/charsets)
+  14  Strength + audit (weak/duplicate/age)
+  15  Clipboard copy w/ timeout
+  16  Breach check (HIBP k-anonymity)
 
 REMOTE (largest, last)
  17  HTTP server skeleton + JWT auth

@@ -44,14 +44,21 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "Run the app").dependOn(&run_cmd.step);
 
-    const test_entry = generate_test_entry(b, "src") catch |err| {
+    const test_source = generate_test_source(b, "src") catch |err| {
         std.log.err("Failed to generate test entry: {}", .{err});
         return;
     };
 
+    // Put the generated test root next to a copy of `src` in one cached
+    // directory. The `_ = @import("src/...")` lines then resolve by relative
+    // path, and nothing lands in the project tree.
+    const test_dir = b.addWriteFiles();
+    _ = test_dir.addCopyDirectory(b.path("src"), "src", .{ .include_extensions = &.{".zig"} });
+    const test_root = test_dir.add("tests.zig", test_source);
+
     const all_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = test_entry,
+            .root_source_file = test_root,
             .target = target,
             .optimize = optimize,
         }),
@@ -60,7 +67,7 @@ pub fn build(b: *std.Build) void {
     b.step("test", "Run all tests").dependOn(&b.addRunArtifact(all_tests).step);
 }
 
-fn generate_test_entry(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath {
+fn generate_test_source(b: *std.Build, src_dir: []const u8) ![]const u8 {
     const allocator = b.allocator;
     const source_files = try find_zig_sources(b, src_dir);
 
@@ -73,12 +80,7 @@ fn generate_test_entry(b: *std.Build, src_dir: []const u8) !std.Build.LazyPath {
         try writer.print("    _ = @import(\"{s}\");\n", .{f});
     try writer.writeAll("}\n");
 
-    const build_root_path = b.build_root.path orelse ".";
-    var dir = try std.Io.Dir.openDirAbsolute(b.graph.io, build_root_path, .{});
-    defer dir.close(b.graph.io);
-    try dir.writeFile(b.graph.io, .{ .sub_path = "auto_test_runner.zig", .data = alloc_writer.written() });
-
-    return b.path("auto_test_runner.zig");
+    return allocator.dupe(u8, alloc_writer.written());
 }
 
 fn find_zig_sources(b: *std.Build, dir: []const u8) ![]const []const u8 {

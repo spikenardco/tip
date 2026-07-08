@@ -155,7 +155,7 @@
 ### Enhanced Functionality
 - [ ] Add password categories and tags
 - [ ] Implement advanced search capabilities
-- [ ] Create custom fields support
+- [x] ~~Create custom fields support~~ (cancelled — premature)
 - [ ] Add password history tracking
 - [ ] Implement secure sharing features
 - [ ] Write feature tests

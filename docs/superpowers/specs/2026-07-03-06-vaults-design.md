@@ -35,11 +35,11 @@ command surface, single-task `task move`, and wires the active-vault selection (
 
 | Approach | Trade-off |
 |----------|-----------|
-| **A (chosen): one `tip.db`, `vaults` table + `tasks.vault_id` FK** | Smallest step from 03. Single migration path. Cross-vault ops (list-all, stats) stay trivial. Per-vault encryption later (10/11) done with app-level encrypted columns keyed per vault. |
+| **A (chosen): one `tip.db`, `vaults` table + `tasks.vault_id` FK** | Smallest step from 03. Single migration path. Cross-vault ops (list-all, stats) stay trivial. Per-vault encryption later done with app-level encrypted columns keyed per vault. |
 | B: one SQLite file per vault (`vaults/personal.db`, `work.db`) | Maps cleanly onto per-vault master passwords, but no cross-vault queries and more file management. Revisit only if crypto forces it — a contained migration. |
 | C: hybrid registry db + per-vault data files | Most moving parts; not justified now. |
 
-If sub-project 10 later proves separate files are essential for crypto, moving from A to B is a
+If crypto later proves separate files are essential for crypto, moving from A to B is a
 contained migration; A does not paint us into a corner.
 
 ---
