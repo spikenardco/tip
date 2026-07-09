@@ -228,6 +228,34 @@ Booleans get the affirmative prefix **in code only**. CLI flags keep their own U
 
 ---
 
+## 6a. Coding conventions
+
+A few rules from [TigerStyle](https://tigerstyle.dev/) worth adopting. The
+rest (static allocation, zero dependencies, 70-line functions) is overkill
+for a CLI tool.
+
+### Error handling
+
+- **No silent `catch {}`.** Propagate the error or print it.
+  - ✗ `list_task(io, dir) catch {};`
+  - ✓ `list_task(io, dir) catch |err| { std.debug.print("list failed: {}\n", .{err}); };`
+  - ✓ `list_task(io, dir) catch return;`
+- **Assert programmer mistakes; return user mistakes.** If only a bug can
+  cause a bad value, assert it. If the user typed something wrong, return an
+  error.
+  - ✗ `if (title.len == 0) return error.EmptyTitle;`
+  - ✓ `assert(title.len > 0);`
+- **Print the real error, not a placeholder.**
+  - ✗ `catch { std.debug.print("Failed to add task\n"); return; };`
+  - ✓ `catch |err| { std.debug.print("Failed to add task: {}\n", .{err}); return; };`
+
+### Comments
+
+- **Say why.** Code says what; comments say why. Focus on non-obvious parts:
+  prefix matching, ID truncation, ordering invariants. Skip the obvious.
+
+---
+
 ## 7. Full decomposition map (all scopes → tiny checkbox plans)
 
 Each box = one short spec + one checkbox plan. Dependencies flow top-down. Ship one at a time.
