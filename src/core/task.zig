@@ -110,40 +110,22 @@ pub const TaskArgs = struct {
     ;
 };
 
-pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: TaskArgs) void {
+pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: TaskArgs) !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var dir = storage.open_data_dir(allocator, io, environ) catch {
-        std.debug.print("Failed to open config directory\n", .{});
-        return;
-    };
+    var dir = storage.open_data_dir(allocator, io, environ) catch return error.StorageFailure;
     defer dir.close(io);
 
-    if (args.list) {
-        list_task(allocator, io, dir) catch {};
-        return;
-    }
+    if (args.list) return list_task(allocator, io, dir);
 
     if (args.subcommand) |subcommand| {
         switch (subcommand) {
-            .add => |a| add_task(allocator, io, dir, a.title, a.desc) catch {
-                std.debug.print("Failed to add task\n", .{});
-                return;
-            },
-            .edit => |e| edit_task(allocator, io, dir, e.id, e.title, e.desc orelse "") catch {
-                std.debug.print("Failed to update task\n", .{});
-                return;
-            },
-            .delete => |del| delete_task(allocator, io, del.id, dir) catch {
-                std.debug.print("Failed to delete task with id: {s}\n", .{del.id});
-                return;
-            },
-            .show => |s| show_task(allocator, io, s.id, dir) catch {
-                std.debug.print("Failed to show task with id: {s}\n", .{s.id});
-                return;
-            },
+            .add => |a| try add_task(allocator, io, dir, a.title, a.desc),
+            .edit => |e| try edit_task(allocator, io, dir, e.id, e.title, e.desc orelse ""),
+            .delete => |del| try delete_task(allocator, io, del.id, dir),
+            .show => |s| try show_task(allocator, io, s.id, dir),
         }
     } else {
         std.debug.print("{s}\n", .{TaskArgs.help});
@@ -162,7 +144,7 @@ fn add_task(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const existing = storage.load_tasks(arena.allocator(), io, dir) catch &[_]models.Task{};
+    const existing = storage.load_tasks(arena.allocator(), io, dir) catch return error.StorageFailure;
 
     var tasks: std.ArrayList(models.Task) = .empty;
     defer tasks.deinit(allocator);
@@ -180,14 +162,14 @@ fn add_task(
         .created_at = now_seconds(io),
     });
 
-    try storage.save_tasks(arena.allocator(), io, dir, tasks.items);
+    storage.save_tasks(arena.allocator(), io, dir, tasks.items) catch return error.StorageFailure;
 }
 
 fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const tasks = storage.load_tasks(arena.allocator(), io, dir) catch return;
+    const tasks = storage.load_tasks(arena.allocator(), io, dir) catch return error.StorageFailure;
 
     if (tasks.len == 0) {
         std.debug.print("No tasks\n", .{});
@@ -324,22 +306,19 @@ fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const tasks = storage.load_tasks(arena.allocator(), io, dir) catch {
-        return error.InvalidItem;
-    };
+    const tasks = storage.load_tasks(arena.allocator(), io, dir) catch return error.StorageFailure;
 
     for (tasks) |*task| {
         if (std.mem.eql(u8, task.id, task_id)) {
             task.status = .completed;
             task.updated_at = now_seconds(io);
             task.completed_at = now_seconds(io);
-            try storage.save_tasks(arena.allocator(), io, dir, tasks);
+            storage.save_tasks(arena.allocator(), io, dir, tasks) catch return error.StorageFailure;
             return;
         }
     }
 
-    std.debug.print("Item {s} does not exist!\n", .{task_id});
-    return error.InvalidItem;
+    return error.TaskNotFound;
 }
 
 fn edit_task(
@@ -353,7 +332,7 @@ fn edit_task(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const existing = try storage.load_tasks(arena.allocator(), io, dir);
+    const existing = storage.load_tasks(arena.allocator(), io, dir) catch return error.StorageFailure;
 
     for (0..existing.len) |i| {
         const id = existing[i].id;
@@ -366,13 +345,12 @@ fn edit_task(
             existing[i].title = title;
             existing[i].description = desc;
             existing[i].updated_at = now_seconds(io);
-            try storage.save_tasks(arena.allocator(), io, dir, existing);
+            storage.save_tasks(arena.allocator(), io, dir, existing) catch return error.StorageFailure;
             return;
         }
     }
 
-    std.debug.print("No task found matching '{s}'\n", .{task_id});
-    return error.InvalidItem;
+    return error.TaskNotFound;
 }
 
 fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
@@ -381,9 +359,7 @@ fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, di
 
     const arena_alloc = arena.allocator();
 
-    const tasks = storage.load_tasks(arena_alloc, io, dir) catch {
-        return error.InvalidItem;
-    };
+    const tasks = storage.load_tasks(arena_alloc, io, dir) catch return error.StorageFailure;
 
     var remaining: std.ArrayList(models.Task) = .empty;
     defer remaining.deinit(arena_alloc);
@@ -404,22 +380,13 @@ fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, di
         }
     }
 
-    if (found_indices.items.len == 0) {
-        std.debug.print("No task found matching '{s}'\n", .{task_id});
-        return error.InvalidItem;
-    }
+    if (found_indices.items.len == 0) return error.TaskNotFound;
+    
 
-    if (found_indices.items.len > 1) {
-        std.debug.print("Multiple tasks match '{s}':\n", .{task_id});
-        for (found_indices.items) |idx| {
-            const task = tasks[idx];
-            std.debug.print("  - {s} [{s}]\n", .{ task.id[0..@min(8, task.id.len)], task.title });
-        }
-        std.debug.print("Use a longer ID to disambiguate.\n", .{});
-        return error.AmbiguousMatch;
-    }
+    if (found_indices.items.len > 1) return error.AmbiguousPrefix;
+    
 
-    try storage.save_tasks(arena_alloc, io, dir, remaining.items);
+    storage.save_tasks(arena_alloc, io, dir, remaining.items) catch return error.StorageFailure;
     std.debug.print("Task deleted: {s}\n", .{tasks[found_indices.items[0]].title});
 }
 
@@ -430,9 +397,7 @@ fn show_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir:
 
     const arena_alloc = arena.allocator();
 
-    const tasks = storage.load_tasks(arena_alloc, io, dir) catch {
-        return error.InvalidItem;
-    };
+    const tasks = storage.load_tasks(arena_alloc, io, dir) catch return error.StorageFailure;
 
     var found_indices: std.ArrayList(usize) = .empty;
     defer found_indices.deinit(arena_alloc);
@@ -448,20 +413,9 @@ fn show_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir:
         }
     }
 
-    if (found_indices.items.len == 0) {
-        std.debug.print("No task found matching '{s}'\n", .{task_id});
-        return error.InvalidItem;
-    }
-
-    if (found_indices.items.len > 1) {
-        std.debug.print("Multiple tasks match '{s}':\n", .{task_id});
-        for (found_indices.items) |idx| {
-            const task = tasks[idx];
-            std.debug.print("  - {s} [{s}]\n", .{ task.id[0..@min(8, task.id.len)], task.title });
-        }
-        std.debug.print("Use a longer ID to disambiguate.\n", .{});
-        return error.AmbiguousMatch;
-    }
+    if (found_indices.items.len == 0) return error.TaskNotFound;
+    
+    if (found_indices.items.len > 1) return error.AmbiguousPrefix;
 
     const task = tasks[found_indices.items[0]];
     try print_task(io, task, true);
@@ -545,7 +499,7 @@ test "delete nonexistent task returns error" {
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try std.testing.expectError(error.InvalidItem, delete_task(allocator, io, "999", tmp_dir.dir));
+    try std.testing.expectError(error.TaskNotFound, delete_task(allocator, io, "999", tmp_dir.dir));
 }
 
 test "list task with no file" {
@@ -588,7 +542,7 @@ test "mark_complete nonexistent task returns error" {
 
     try add_task(allocator, io, tmp_dir.dir, "Some Task", null);
 
-    try std.testing.expectError(error.InvalidItem, mark_complete(allocator, io, "nonexistent-id", tmp_dir.dir));
+    try std.testing.expectError(error.TaskNotFound, mark_complete(allocator, io, "nonexistent-id", tmp_dir.dir));
 }
 
 test "add empty task name returns error" {
