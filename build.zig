@@ -9,6 +9,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }).module("flags");
 
+    const sqlite = b.dependency("sqlite", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("sqlite");
+
     const manifest = std.zon.parse.fromSliceAlloc(
         struct { version: []const u8 },
         b.allocator,
@@ -32,6 +37,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "flags", .module = flags },
                 .{ .name = "version", .module = version_module },
+                .{ .name = "sqlite", .module = sqlite },
             },
         }),
     });

@@ -8,6 +8,10 @@
             .url = "git+https://github.com/spikenardco/flags.zig#d59be9f6f188a26e8af6959ce8c05e305458686b",
             .hash = "flags-0.2.1-GjWK4inSAADhRL56XvkAh12bCDB_DDNHVAHVk2usi1nb",
         },
+        .sqlite = .{
+            .url = "git+https://github.com/vrischmann/zig-sqlite#946d77c526258760b52836187af32d1a192c5d36",
+            .hash = "sqlite-3.48.0-F2R_azCQDgBGaWDIX4g2vxKpuqzYEQOOfAeJGMNocPu0",
+        },
     },
     .paths = .{
         "build.zig",
