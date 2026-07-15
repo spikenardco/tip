@@ -2,6 +2,7 @@ const std = @import("std");
 const version_mod = @import("version");
 const flags = @import("flags");
 const task = @import("core/task.zig");
+const errors = @import("core/errors.zig");
 
 const Args = struct {
     command: union(enum) {
@@ -43,10 +44,13 @@ pub fn main(init: std.process.Init) !void {
     var diag: flags.Diagnostic = .{};
     const parsed = flags.parse(allocator, args, Args, &diag) catch |err| {
         diag.report();
-        std.process.exit(if (err == error.HelpRequested) 0 else 1);
+        std.process.exit(if (err == error.HelpRequested) 0 else 2);
     };
 
     switch (parsed.command) {
-        .task => |t| task.dispatch_task_command(init.io, init.minimal.environ, t),
+        .task => |t| task.dispatch_task_command(init.io, init.minimal.environ, t) catch |err| {
+            std.debug.print("error: {s}\n", .{errors.describe(err)});
+            std.process.exit(errors.exit_code(err));
+        },
     }
 }
