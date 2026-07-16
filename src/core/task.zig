@@ -2,62 +2,7 @@ const std = @import("std");
 const models = @import("models.zig");
 const storage = @import("../storage/json.zig");
 const generate = @import("../utils/generate.zig");
-
-const Ansi = enum {
-    red,
-    green,
-    yellow,
-    cyan,
-    reset,
-};
-
-fn ansi_code(c: Ansi) []const u8 {
-    return switch (c) {
-        .red => "\x1b[31m",
-        .green => "\x1b[32m",
-        .yellow => "\x1b[33m",
-        .cyan => "\x1b[36m",
-        .reset => "\x1b[0m",
-    };
-}
-
-fn priority_glyph(priority: ?models.Task.Priority) []const u8 {
-    if (priority) |p| {
-        return switch (p) {
-            .high => "↑",
-            .medium => "-",
-            .low => "↓",
-        };
-    }
-    return "";
-}
-
-fn priority_color(priority: ?models.Task.Priority) Ansi {
-    if (priority) |p| {
-        return switch (p) {
-            .high => .red,
-            .medium => .yellow,
-            .low => .green,
-        };
-    }
-    return .reset;
-}
-
-fn status_icon(status: models.Task.Status) []const u8 {
-    return switch (status) {
-        .pending => "○",
-        .in_progress => "⟳",
-        .completed => "✓",
-    };
-}
-
-fn status_color(status: models.Task.Status) Ansi {
-    return switch (status) {
-        .pending => .reset,
-        .in_progress => .cyan,
-        .completed => .green,
-    };
-}
+const ansi = @import("../utils/ansi.zig");
 
 fn now_seconds(io: std.Io) i64 {
     return std.Io.Timestamp.now(io, .real).toSeconds();
@@ -194,7 +139,7 @@ fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     }
 
     if (pending.items.len > 0) {
-        std.debug.print("{s}Pending{s} ({d})\n", .{ ansi_code(.cyan), ansi_code(.reset), pending.items.len });
+        std.debug.print("{s}Pending{s} ({d})\n", .{ ansi.ansi_code(.cyan), ansi.ansi_code(.reset), pending.items.len });
         for (pending.items) |task| {
             try print_task(io, task, false);
         }
@@ -202,7 +147,7 @@ fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     }
 
     if (in_progress.items.len > 0) {
-        std.debug.print("{s}In Progress{s} ({d})\n", .{ ansi_code(.cyan), ansi_code(.reset), in_progress.items.len });
+        std.debug.print("{s}In Progress{s} ({d})\n", .{ ansi.ansi_code(.cyan), ansi.ansi_code(.reset), in_progress.items.len });
         for (in_progress.items) |task| {
             try print_task(io, task, false);
         }
@@ -210,7 +155,7 @@ fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     }
 
     if (completed.items.len > 0) {
-        std.debug.print("{s}Completed{s} ({d})\n", .{ ansi_code(.green), ansi_code(.reset), completed.items.len });
+        std.debug.print("{s}Completed{s} ({d})\n", .{ ansi.ansi_code(.green), ansi.ansi_code(.reset), completed.items.len });
         for (completed.items) |task| {
             try print_task(io, task, false);
         }
@@ -218,12 +163,12 @@ fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
 }
 
 fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
-    const c_status = status_color(task.status);
-    const c_reset = ansi_code(.reset);
+    const c_status = ansi.status_color(task.status);
+    const c_reset = ansi.ansi_code(.reset);
     const compact_id = if (task.id.len > 8) task.id[0..8] else task.id;
 
     if (detailed) {
-        std.debug.print("{s}=== Task Details ==={s}\n\n", .{ ansi_code(.cyan), c_reset });
+        std.debug.print("{s}=== Task Details ==={s}\n\n", .{ ansi.ansi_code(.cyan), c_reset });
         std.debug.print("ID:          {s}\n", .{task.id});
         std.debug.print("Title:       {s}\n", .{task.title});
 
@@ -233,10 +178,10 @@ fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
             std.debug.print("Description: -\n", .{});
         }
 
-        std.debug.print("Status:      {s}{s}{s}\n", .{ ansi_code(c_status), status_icon(task.status), c_reset });
+        std.debug.print("Status:      {s}{s}{s}\n", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
 
         if (task.priority) |p| {
-            std.debug.print("Priority:    {s}{s}{s}\n", .{ ansi_code(priority_color(task.priority)), priority_glyph(p), c_reset });
+            std.debug.print("Priority:    {s}{s}{s}\n", .{ ansi.ansi_code(ansi.priority_color(task.priority)), ansi.priority_glyph(p), c_reset });
         } else {
             std.debug.print("Priority:    -\n", .{});
         }
@@ -273,32 +218,32 @@ fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
             std.debug.print("Completed:   -\n", .{});
         }
     } else {
-        std.debug.print("  {s}{s}{s} ", .{ ansi_code(c_status), status_icon(task.status), c_reset });
+        std.debug.print("  {s}{s}{s} ", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
         if (task.priority) |p| {
-            std.debug.print("{s} ", .{priority_glyph(p)});
+            std.debug.print("{s} ", .{ansi.priority_glyph(p)});
         }
         std.debug.print("{s}\n", .{task.title});
 
         if (task.description) |desc| {
-            std.debug.print("      {s}desc:{s} {s}\n", .{ ansi_code(.yellow), c_reset, desc });
+            std.debug.print("      {s}desc:{s} {s}\n", .{ ansi.ansi_code(.yellow), c_reset, desc });
         }
 
         if (task.due_date) |due| {
             const now = now_seconds(io);
             if (due < now) {
-                std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi_code(.red), due, c_reset });
+                std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi.ansi_code(.red), due, c_reset });
             } else {
-                std.debug.print("      {s}Due: {d}{s}\n", .{ ansi_code(.yellow), due, c_reset });
+                std.debug.print("      {s}Due: {d}{s}\n", .{ ansi.ansi_code(.yellow), due, c_reset });
             }
         }
 
         if (task.status == .completed) {
             if (task.completed_at) |completed| {
-                std.debug.print("      {s}Completed: {d}{s}\n", .{ ansi_code(.green), completed, c_reset });
+                std.debug.print("      {s}Completed: {d}{s}\n", .{ ansi.ansi_code(.green), completed, c_reset });
             }
         }
 
-        std.debug.print("      {s}ID: {s}{s}\n", .{ ansi_code(.yellow), compact_id, c_reset });
+        std.debug.print("      {s}ID: {s}{s}\n", .{ ansi.ansi_code(.yellow), compact_id, c_reset });
     }
 }
 
@@ -381,10 +326,8 @@ fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, di
     }
 
     if (found_indices.items.len == 0) return error.TaskNotFound;
-    
 
     if (found_indices.items.len > 1) return error.AmbiguousPrefix;
-    
 
     storage.save_tasks(arena_alloc, io, dir, remaining.items) catch return error.StorageFailure;
     std.debug.print("Task deleted: {s}\n", .{tasks[found_indices.items[0]].title});
@@ -414,7 +357,7 @@ fn show_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir:
     }
 
     if (found_indices.items.len == 0) return error.TaskNotFound;
-    
+
     if (found_indices.items.len > 1) return error.AmbiguousPrefix;
 
     const task = tasks[found_indices.items[0]];
