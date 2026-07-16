@@ -14,7 +14,7 @@ This sub-project creates the `Vault` handle that replaces the threaded `(allocat
 
 | # | Decision | Status |
 |---|----------|--------|
-| S1 | **`Vault` handle** wraps `*sqlite.Db` and exposes `vault.tasks` child handle. | LOCKED |
+| S1 | **`Vault` handle** wraps `*zqlite.Conn` and exposes `vault.tasks` child handle. | LOCKED |
 | S2 | **`Vault.capture(io)`** at open time — methods don't thread `io`. | LOCKED |
 | S3 | **`Task` struct stays in `models.zig`** — shared between vault and CLI. | LOCKED |
 | S4 | **Ansi helpers extracted** to `src/utils/ansi.zig`. | LOCKED |
@@ -167,7 +167,7 @@ INSERT OR IGNORE INTO _schema_version (version) VALUES (2);
 
 ```zig
 pub const Vault = struct {
-    db: *sqlite.Db,
+    db: *zqlite.Conn,
     io: std.Io,
     tasks: Tasks,
 
@@ -248,7 +248,7 @@ pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: Tas
 
 ## Part F — Testing
 
-All tests use `sqlite.Db.init(.{ .mode = .{ .Memory = {} } })`:
+All tests use `zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode)`:
 
 | Test | What it verifies |
 |------|------------------|

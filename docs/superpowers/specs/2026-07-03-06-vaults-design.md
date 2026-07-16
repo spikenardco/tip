@@ -132,7 +132,7 @@ Renames 03's `Vault` → `Store`. `store.tasks` is auto-scoped to the active vau
 
 ```zig
 pub const Store = struct {
-    db: *sqlite.Db,
+    db: *zqlite.Conn,
     io: std.Io,
     active_vault_id: []const u8,   // resolved at open from options/config
     tasks: Tasks,
@@ -266,7 +266,7 @@ Prefix-match / ambiguity for `task move <id>` reuse the sub-project 04 helper (`
 
 ---
 
-## Part J — Testing (in-memory sqlite `:memory:`)
+## Part J — Testing (in-memory zqlite `:memory:`)
 
 | Test | Verifies |
 |------|----------|

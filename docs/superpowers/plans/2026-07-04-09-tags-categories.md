@@ -6,7 +6,7 @@
 
 **Architecture:** New `src/core/category.zig` and `src/core/tag.zig` modules define the types, CLI dispatch, and vault handle integration. `models.zig` gets `Category` and `Tag` types; `Task` gains a `category_id` FK. The `TaskQuery` builder (SP08) gains `category` and `tags` filter fields. A SQLite migration creates `categories`, `tags`, and `task_tags` tables.
 
-**Tech Stack:** Zig 0.16 (`std.Io` async model), `zig-sqlite`, `flags` dependency, SQLite.
+**Tech Stack:** Zig 0.16 (`std.Io` async model), `zqlite`, `flags` dependency, SQLite.
 
 **Dependency:** This plan requires **sub-projects 01–08 to be implemented first** — it relies on the `Vault` handle from SP03, `Vault.Tasks` from SP03/SP04, vaults from SP06, config from SP05, SQLite migration runner from SP02, error taxonomy from SP01, and `TaskQuery`/`build_where_clause` from SP08.
 
@@ -19,7 +19,7 @@
 - **Error taxonomy (sub-project 01):** `CategoryNotFound`, `TagNotFound`, `DuplicateCategoryName`, `DuplicateTagName`, `InvalidCategoryName`, `InvalidTagName`, `TaskNotFound`, `StorageFailure`. Commands return errors; `main.zig` renders via `errors.describe`/`errors.exit_code`.
 - **Exit codes:** `0` ok · `1` internal · `2` usage · `3` not found · `4` validation.
 - **Vault handle (SP03):** `Vault.open(allocator, io, .{ .name = name })` → `Vault`, `vault.tasks` → `Tasks` handle, `vault.categories` → `Categories` handle, `vault.tags` → `Tags` handle.
-- **zig-sqlite API:** `Db.init(.{ .mode = .{ .Memory = {} } })` for in-memory, `db.exec(sql, params, .{})` for statements, `db.one(T, sql, params, .{ .allocator = allocator })` for single-row, `db.all(T, sql, params, .{ .allocator = allocator })` for multi-row.
+- **zqlite API:** `zqlite.open(path, flags)` for connections, `conn.exec(sql, params)` (2 args), `conn.row(sql, params)` returns `?Row`, `conn.rows(sql, params)` returns `Rows`. Column access: `row.int(0)`, `row.text(1)`, etc.
 - **Tests:** `zig build test --summary all` from repo root. Tests use in-memory SQLite.
 - **Tags filter composes as AND with other filters.** Multiple `--tag` flags narrow the result (task must have ALL specified tags).
 - **Categories are flat** (no nesting). Name must be unique per vault.
@@ -613,7 +613,7 @@ if (q.tags) |tags| {
 }
 ```
 
-**Important:** The `tags` SQL clause above generates a single `?` placeholder for all tag names via the `IN (SELECT ... WHERE name = ?)` subquery. Since the `flags` library passes `[]const []const u8` as individual params, we need one `?` per tag. Replace the clause with repeated `?` placeholders when building the SQL string. The step implementer should loop over `tags` to create `name = ? OR name = ?` inside the subquery or use a single comma-separated approach compatible with zig-sqlite's bind param system.
+**Important:** The `tags` SQL clause above generates a single `?` placeholder for all tag names via the `IN (SELECT ... WHERE name = ?)` subquery. Since the `flags` library passes `[]const []const u8` as individual params, we need one `?` per tag. Replace the clause with repeated `?` placeholders when building the SQL string. The step implementer should loop over `tags` to create `name = ? OR name = ?` inside the subquery or use a single comma-separated approach compatible with zqlite's bind param system.
 
 Implementation approach — build the tag-name placeholders dynamically:
 

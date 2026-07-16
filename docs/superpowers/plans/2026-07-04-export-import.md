@@ -6,7 +6,7 @@
 
 **Architecture:** Two new modules — `src/core/export.zig` (builds JSON export files, writes atomically) and `src/core/import.zig` (parses JSON backup files, dispatches to new/restore/merge SQL operations via the Store handle from SP06). File format is a consistent `{version, exported_at, vaults[]}` envelope. Import uses SQLite transactions for atomicity.
 
-**Tech Stack:** Zig 0.16 (`std.Io`, `std.json`, `std.fs`), `zig-sqlite`, `flags` dependency.
+**Tech Stack:** Zig 0.16 (`std.Io`, `std.json`, `std.fs`), `zqlite`, `flags` dependency.
 
 ---
 
@@ -20,7 +20,7 @@
 - **Import modes:** `new` (default — create vault from backup, error if name exists), `restore` (--vault, delete + insert), `merge` (--vault --merge, INSERT OR IGNORE).
 - **Atomic writes:** export uses temp file + atomic rename; import uses SQLite transactions.
 - **Dry-run:** parse file, compare against store, print preview, no writes.
-- **Tests:** `zig build test --summary all` from repo root; storage tests use in-memory sqlite (`.mode = .{ .Memory = {} }`).
+- **Tests:** `zig build test --summary all` from repo root; storage tests use in-memory zqlite (`zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode)`).
 - **Dependency:** This plan requires sub-projects 01–06 implemented first (Store handle, vaults, config, errors, models, SQLite connection with `PRAGMA foreign_keys = ON`).
 - **Out of scope:** CSV, encrypted export, cross-tool import, password/tag export.
 
@@ -716,7 +716,7 @@ fn insert_task(store: *Store, vault_id: []const u8, task: models.Task) !void {
         \\INSERT OR IGNORE INTO tasks
         \\(id, vault_id, title, description, status, priority, due_date, assigned_to, created_at, updated_at, completed_at)
         \\VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    , .{}, .{
+    , .{
         .id = task.id,
         .vault_id = vault_id,
         .title = task.title,
@@ -814,11 +814,11 @@ pub fn import_from_file(store: *Store, allocator: std.mem.Allocator, io: std.Io,
             defer { allocator.free(target.id); allocator.free(target.name); }
 
             // Wrap in a transaction
-            try store.db.exec("BEGIN TRANSACTION", .{}, .{});
-            defer store.db.exec("COMMIT", .{}, .{}) catch {};
+            try store.db.exec("BEGIN TRANSACTION", .{});
+            defer store.db.exec("COMMIT", .{}) catch {};
 
             // Delete existing tasks
-            try store.db.exec("DELETE FROM tasks WHERE vault_id = ?", .{}, .{ .vault_id = target.id });
+            try store.db.exec("DELETE FROM tasks WHERE vault_id = ?", .{ .vault_id = target.id });
 
             // Insert backup tasks
             for (import_file.vaults) |ev| {

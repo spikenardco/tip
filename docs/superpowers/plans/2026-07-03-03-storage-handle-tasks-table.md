@@ -4,15 +4,15 @@
 
 **Goal:** Replace the threaded `(allocator, io, dir, ...)` parameter pattern with a `Vault` handle owning shared context, migrate task CRUD from JSON to SQLite, and remove the JSON storage module.
 
-**Architecture:** A `Vault` handle wraps a `*sqlite.Db` connection and exposes a `vault.tasks` child handle. Handle methods return data (no printing); the CLI layer in `task.zig` formats output. Platform directory resolution moves to `src/storage/dir.zig` with a comptime config. Ansi rendering helpers extract to `src/utils/ansi.zig`. Tasks table schema in `002_create_tasks.sql`.
+**Architecture:** A `Vault` handle wraps a `*zqlite.Conn` connection and exposes a `vault.tasks` child handle. Handle methods return data (no printing); the CLI layer in `task.zig` formats output. Platform directory resolution moves to `src/storage/dir.zig` with a comptime config. Ansi rendering helpers extract to `src/utils/ansi.zig`. Tasks table schema in `002_create_tasks.sql`.
 
-**Tech Stack:** Zig 0.16 (`std.Io` async model), `zig-sqlite` dependency, `sqlite.Db` API.
+**Tech Stack:** Zig 0.16 (`std.Io` async model), `zqlite` dependency, `zqlite` API.
 
 ## Global Constraints
 
 - **Zig version:** 0.16.0 (`minimum_zig_version = "0.16.0"`). Use the new `std.Io` APIs.
 - **Identifier casing:** functions/vars/fields = `snake_case`; types = `PascalCase`; enum members = `snake_case`.
-- **zig-sqlite API:** `Db.init(.{ .mode = .{ .Memory = {} } })` for in-memory, `Db.init(.{ .mode = .{ .File = path }, .open_flags = .{ .write = true, .create = true } })` for files. `db.exec(sql, params, .{})` for statements, `db.one(T, sql, params, .{ .allocator = allocator })` for single-row queries, `db.all(T, sql, params, .{ .allocator = allocator })` for multi-row.
+- **zqlite API:** `zqlite.open(path, flags)` for connections (`zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode`). `conn.exec(sql, params)` for statements (2 args). `conn.row(sql, params)` returns `?Row` for single-row queries. `conn.rows(sql, params)` returns `Rows` for multi-row queries (iterate with `rows.next()`). Column access: `row.int(0)`, `row.text(1)`, `row.nullableText(2)`, `row.get(T, col)`.
 - **Environment variables:** use `environ.getPosix(name)` which returns `?[]const u8` with no allocation.
 - **Error taxonomy (sub-project 01):** `TaskNotFound`, `AmbiguousPrefix`, `StorageFailure`, `EmptyTitle`. Commands return errors; `main.zig` renders via `errors.describe`/`errors.exit_code`.
 - **Tests:** `zig build test --summary all` from repo root. New test files under `src/` are auto-discovered.
@@ -365,7 +365,7 @@ git commit -m "feat: add tasks table migration"
 
 **Interfaces:**
 - Consumes:
-  - `sqlite.Db.init(...)` / `db.exec(...)` / `db.one(...)` / `db.all(...)` from zig-sqlite
+  - `zqlite.open(path, flags)` / `db.exec(sql, params)` / `db.row(sql, params)` / `db.rows(sql, params)` from zqlite
   - `src/storage/dir.zig::open_data_dir`
   - `src/utils/generate.zig::generate_id`
   - `src/core/models.zig::Task`
@@ -380,7 +380,7 @@ git commit -m "feat: add tasks table migration"
 
 ```zig
 const std = @import("std");
-const sqlite = @import("sqlite");
+const zqlite = @import("zqlite");
 const models = @import("models.zig");
 const generate = @import("../utils/generate.zig");
 const dir = @import("../storage/dir.zig");
@@ -403,7 +403,7 @@ pub const EditFields = struct {
 };
 
 pub const Vault = struct {
-    db: *sqlite.Db,
+    db: *zqlite.Conn,
     io: std.Io,
     tasks: Tasks,
 
@@ -419,16 +419,13 @@ pub const Vault = struct {
 
         errdefer allocator.free(c_path);
 
-        var db = try allocator.create(sqlite.Db);
+        var db = try allocator.create(zqlite.Conn);
         errdefer allocator.destroy(db);
 
-        db.* = try sqlite.Db.init(.{
-            .mode = .{ .File = c_path },
-            .open_flags = .{ .write = true, .create = true },
-        });
+        db.* = try zqlite.open(c_path, zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
         errdefer db.deinit();
 
-        try db.exec("PRAGMA journal_mode = WAL", .{}, .{});
+        try db.exec("PRAGMA journal_mode = WAL", .{});
         try migrate.run_migrations(db);
 
         return Vault{
@@ -449,6 +446,21 @@ pub const Vault = struct {
             return std.Io.Timestamp.now(io, .real).toSeconds();
         }
 
+        fn scanTask(row: zqlite.Row) models.Task {
+            return .{
+                .id = row.text(0),
+                .title = row.text(1),
+                .description = row.nullableText(2),
+                .status = row.text(3),
+                .priority = row.nullableText(4),
+                .due_date = row.get(?i64, 5),
+                .assigned_to = row.nullableText(6),
+                .created_at = row.int(7),
+                .updated_at = row.get(?i64, 8),
+                .completed_at = row.get(?i64, 9),
+            };
+        }
+
         pub fn add(self: *Tasks, args: AddFields) !models.Task {
             const id = try generate.generate_id(std.testing.allocator, self.vault.io);
             defer std.testing.allocator.free(id);
@@ -458,128 +470,79 @@ pub const Vault = struct {
             try self.vault.db.exec(
                 "INSERT INTO tasks (id, title, description, status, priority, due_date, assigned_to, created_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
                 .{ id, args.title, args.description, args.priority, args.due_date, args.assigned_to, now },
-                .{},
             );
 
             // Read back to return a fully populated struct
-            const task = try self.vault.db.one(
-                models.Task,
-                "SELECT * FROM tasks WHERE id = ?",
-                .{id},
-                .{ .allocator = std.testing.allocator },
-            );
-            return task orelse error.StorageFailure;
+            const row = (try self.vault.db.row("SELECT * FROM tasks WHERE id = ?", .{id})) orelse return error.StorageFailure;
+            return scanTask(row);
         }
 
         pub fn list(self: *Tasks, allocator: std.mem.Allocator) ![]models.Task {
-            const tasks = try self.vault.db.all(
-                models.Task,
-                "SELECT * FROM tasks ORDER BY created_at ASC",
-                .{},
-                .{ .allocator = allocator },
-            );
-            return tasks;
+            var result = try self.vault.db.rows("SELECT * FROM tasks ORDER BY created_at ASC", .{});
+            defer result.deinit();
+
+            var list = std.ArrayList(models.Task).empty;
+            errdefer list.deinit(allocator);
+
+            while (try result.next()) |row| {
+                try list.append(allocator, scanTask(row));
+            }
+            return try list.toOwnedSlice(allocator);
         }
 
         pub fn get_by_id(self: *Tasks, allocator: std.mem.Allocator, id: []const u8) !models.Task {
             // Exact match first
-            if (try self.vault.db.one(
-                models.Task,
-                "SELECT * FROM tasks WHERE id = ?",
-                .{id},
-                .{ .allocator = allocator },
-            )) |task| return task;
+            if (try self.vault.db.row("SELECT * FROM tasks WHERE id = ?", .{id})) |row| {
+                return scanTask(row);
+            }
 
             // Prefix match: WHERE id LIKE 'prefix%'
             const pattern = try std.mem.concat(allocator, u8, &.{ id, "%" });
             defer allocator.free(pattern);
 
-            const matches = try self.vault.db.all(
-                models.Task,
-                "SELECT * FROM tasks WHERE id LIKE ? ORDER BY id",
-                .{pattern},
-                .{ .allocator = allocator },
-            );
+            var result = try self.vault.db.rows("SELECT * FROM tasks WHERE id LIKE ? ORDER BY id", .{pattern});
+            defer result.deinit();
 
-            if (matches.len == 0) return error.TaskNotFound;
-            if (matches.len > 1) return error.AmbiguousPrefix;
-            return matches[0];
+            var count: usize = 0;
+            var first: ?models.Task = null;
+            while (try result.next()) |row| {
+                if (count == 0) first = scanTask(row);
+                count += 1;
+            }
+
+            if (count == 0) return error.TaskNotFound;
+            if (count > 1) return error.AmbiguousPrefix;
+            return first.?;
         }
 
         pub fn edit(self: *Tasks, id: []const u8, fields: EditFields) !void {
             // Check task exists
-            const exists = try self.vault.db.one(
-                ?[]const u8,
-                "SELECT id FROM tasks WHERE id = ?",
-                .{id},
-                .{ .allocator = std.testing.allocator },
-            );
-            if (exists == null) return error.TaskNotFound;
+            if ((try self.vault.db.row("SELECT id FROM tasks WHERE id = ?", .{id})) == null)
+                return error.TaskNotFound;
 
             const now = now_seconds(self.vault.io);
 
-            // Build SET clause dynamically for non-null fields
-            var set_parts: [5][]const u8 = undefined;
-            var set_count: usize = 0;
-            var params: [6]sqlite.Value = undefined;
-            var param_count: usize = 0;
-
             if (fields.title) |v| {
-                set_parts[set_count] = "title = ?";
-                params[param_count] = .{ .text = v };
-                set_count += 1;
-                param_count += 1;
+                try self.vault.db.exec("UPDATE tasks SET title = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
             }
             if (fields.description) |v| {
-                set_parts[set_count] = "description = ?";
-                params[param_count] = .{ .text = v };
-                set_count += 1;
-                param_count += 1;
+                try self.vault.db.exec("UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
             }
             if (fields.priority) |v| {
-                set_parts[set_count] = "priority = ?";
-                params[param_count] = .{ .text = v };
-                set_count += 1;
-                param_count += 1;
+                try self.vault.db.exec("UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
             }
             if (fields.due_date) |v| {
-                set_parts[set_count] = "due_date = ?";
-                params[param_count] = .{ .int = v };
-                set_count += 1;
-                param_count += 1;
+                try self.vault.db.exec("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
             }
             if (fields.assigned_to) |v| {
-                set_parts[set_count] = "assigned_to = ?";
-                params[param_count] = .{ .text = v };
-                set_count += 1;
-                param_count += 1;
+                try self.vault.db.exec("UPDATE tasks SET assigned_to = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
             }
-
-            // Always set updated_at
-            set_parts[set_count] = "updated_at = ?";
-            params[param_count] = .{ .int = now };
-            set_count += 1;
-            param_count += 1;
-
-            var query = std.ArrayList(u8).empty;
-            defer query.deinit(std.testing.allocator);
-            try query.appendSlice(std.testing.allocator, "UPDATE tasks SET ");
-            for (0..set_count) |i| {
-                if (i > 0) try query.appendSlice(std.testing.allocator, ", ");
-                try query.appendSlice(std.testing.allocator, set_parts[i]);
-            }
-            try query.appendSlice(std.testing.allocator, " WHERE id = ?");
-            params[param_count] = .{ .text = id };
-            param_count += 1;
-
-            try self.vault.db.exec(query.items, params[0..param_count], .{});
         }
 
         pub fn delete(self: *Tasks, id: []const u8) !void {
             const changes = try self.vault.db.exec(
                 "DELETE FROM tasks WHERE id = ?",
                 .{id},
-                .{},
             );
             if (changes == 0) return error.TaskNotFound;
         }
@@ -589,7 +552,6 @@ pub const Vault = struct {
             const changes = try self.vault.db.exec(
                 "UPDATE tasks SET status = 'completed', updated_at = ?, completed_at = ? WHERE id = ?",
                 .{ now, now, id },
-                .{},
             );
             if (changes == 0) return error.TaskNotFound;
         }
@@ -599,7 +561,6 @@ pub const Vault = struct {
             const changes = try self.vault.db.exec(
                 "UPDATE tasks SET status = 'in_progress', updated_at = ? WHERE id = ?",
                 .{ now, id },
-                .{},
             );
             if (changes == 0) return error.TaskNotFound;
         }
@@ -622,11 +583,11 @@ test "add and get_by_id" {
     const io = std.testing.io;
     // Use env with HOME set for platform dir resolution
     // For in-memory testing, we bypass open and create the vault manually
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -649,11 +610,11 @@ test "add and list returns all tasks" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -675,10 +636,10 @@ test "list empty returns empty slice" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -691,11 +652,11 @@ test "edit updates fields" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -714,11 +675,11 @@ test "delete removes task" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -733,10 +694,10 @@ test "delete removes task" {
 test "delete nonexistent returns TaskNotFound" {
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -748,11 +709,11 @@ test "get_by_id prefix match" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -770,10 +731,10 @@ test "get_by_id not found returns TaskNotFound" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -785,11 +746,11 @@ test "complete and start set status" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     defer db.deinit();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };

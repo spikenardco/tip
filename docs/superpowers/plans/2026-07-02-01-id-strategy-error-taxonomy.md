@@ -1,5 +1,7 @@
 # Sub-project 01 — ID Strategy + Error Taxonomy Implementation Plan
 
+> **Status:** COMPLETE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the fake-UUID id generator with real ULIDs, and replace scattered ad-hoc errors + silent `catch {}` swallowing with a domain-grouped error taxonomy rendered by a single central handler.
@@ -32,7 +34,7 @@ Replace the timestamp+random hex concat in `generate_id` with a real ULID encode
 - Consumes: `std.Io.Timestamp.now(io, .real).toMilliseconds()`, `std.crypto.random.bytes`.
 - Produces: `pub fn generate_id(allocator: std.mem.Allocator, io: std.Io) ![]u8` returning a 26-char ULID string owned by `allocator` (caller frees). Internal `fn encode_ulid(ts_ms: u64, rand: [10]u8, out: *[26]u8) void`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `src/utils/generate.zig`:
 
@@ -70,12 +72,12 @@ test "generate_id length alphabet and uniqueness" {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `zig build test --summary all`
 Expected: compile error / failure — `encode_ulid` is not defined yet.
 
-- [ ] **Step 3: Rewrite the implementation**
+- [x] **Step 3: Rewrite the implementation**
 
 Replace the entire contents of `src/utils/generate.zig` with (keep the tests you added in Step 1 at the bottom):
 
@@ -121,12 +123,12 @@ pub fn generate_id(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `zig build test --summary all`
 Expected: PASS — all four new tests pass and the existing task tests (which assert `id.len > 0` and id uniqueness) still pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/utils/generate.zig
@@ -152,7 +154,7 @@ Create the domain-grouped error sets and the central `describe`/`exit_code` mapp
   - `pub fn describe(err: anyerror) []const u8`
   - `pub fn exit_code(err: anyerror) u8`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/core/errors.zig` containing ONLY the tests first (so the run fails on missing symbols):
 
@@ -179,12 +181,12 @@ test "exit_code maps errors to semantic codes" {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `zig build test --summary all`
 Expected: compile error / failure — `describe` and `exit_code` are not defined yet.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Prepend the implementation above the tests in `src/core/errors.zig` (keep the `const std` import at the top):
 
@@ -228,12 +230,12 @@ pub fn exit_code(err: anyerror) u8 {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `zig build test --summary all`
 Expected: PASS — all three error tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/core/errors.zig
@@ -253,7 +255,7 @@ Replace `error.InvalidItem`/`error.AmbiguousMatch` with the taxonomy's errors, m
 - Consumes: `error.StorageFailure`, `error.TaskNotFound`, `error.AmbiguousPrefix`, `error.EmptyTitle` (from Task 2; referenced as bare `error.X`, no import needed).
 - Produces: command functions now return only taxonomy errors — `add_task` → `EmptyTitle`/`StorageFailure`; `edit_task`/`delete_task`/`show_task`/`mark_complete` → `TaskNotFound`/`AmbiguousPrefix`/`StorageFailure`.
 
-- [ ] **Step 1: Update the tests to expect the new error values**
+- [x] **Step 1: Update the tests to expect the new error values**
 
 In `src/core/task.zig`, change the two tests that assert `error.InvalidItem`:
 
@@ -277,12 +279,12 @@ with:
 
 Leave the `error.EmptyTitle` test unchanged.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `zig build test --summary all`
 Expected: FAIL — `delete_task`/`mark_complete` still return `error.InvalidItem`, so the two updated tests fail.
 
-- [ ] **Step 3: Update `add_task` storage boundaries**
+- [x] **Step 3: Update `add_task` storage boundaries**
 
 In `add_task`, replace the swallowing load and the plain save:
 
@@ -306,7 +308,7 @@ with:
 
 (`if (title.len == 0) return error.EmptyTitle;` stays unchanged. `load_tasks` already returns an empty slice for a missing file, so a fresh install still works.)
 
-- [ ] **Step 4: Update `mark_complete`**
+- [x] **Step 4: Update `mark_complete`**
 
 Replace:
 ```zig
@@ -344,7 +346,7 @@ with:
     return error.TaskNotFound;
 ```
 
-- [ ] **Step 5: Update `edit_task`**
+- [x] **Step 5: Update `edit_task`**
 
 Replace:
 ```zig
@@ -379,7 +381,7 @@ with:
 
 (Leave `edit_task`'s first-match-wins prefix logic as-is — ambiguity handling is sub-project 04.)
 
-- [ ] **Step 6: Update `delete_task`**
+- [x] **Step 6: Update `delete_task`**
 
 Replace:
 ```zig
@@ -428,7 +430,7 @@ with:
 
 (The multi-line "which tasks matched" listing is deferred to sub-project 04, which owns the typed prefix-matcher. The success message stays — it is output, not an error.)
 
-- [ ] **Step 7: Update `show_task`**
+- [x] **Step 7: Update `show_task`**
 
 Replace:
 ```zig
@@ -475,7 +477,7 @@ with:
     try print_task(io, task, true);
 ```
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [x] **Step 8: Run tests to verify they pass**
 
 Run: `zig build test --summary all`
 Expected: PASS — the updated `TaskNotFound` tests pass, the `EmptyTitle` test still passes, and no reference to `error.InvalidItem` or `error.AmbiguousMatch` remains. Confirm with:
@@ -483,7 +485,7 @@ Expected: PASS — the updated `TaskNotFound` tests pass, the `EmptyTitle` test 
 Run: `rg -n "InvalidItem|AmbiguousMatch" src/`
 Expected: no matches.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/core/task.zig
@@ -504,7 +506,7 @@ Make `dispatch_task_command` propagate errors (`!void`) instead of swallowing th
 - Consumes: `errors.describe(anyerror) []const u8`, `errors.exit_code(anyerror) u8` (Task 2).
 - Produces: `pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: TaskArgs) !void`.
 
-- [ ] **Step 1: Rewrite `dispatch_task_command` to propagate errors**
+- [x] **Step 1: Rewrite `dispatch_task_command` to propagate errors**
 
 In `src/core/task.zig`, replace the whole function:
 
@@ -574,7 +576,7 @@ pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: Tas
 }
 ```
 
-- [ ] **Step 2: Also make `list_task` propagate storage errors**
+- [x] **Step 2: Also make `list_task` propagate storage errors**
 
 In `src/core/task.zig`, in `list_task`, replace:
 ```zig
@@ -586,7 +588,7 @@ with:
 ```
 (A missing file still yields an empty slice → "No tasks"; only real read/parse failures now surface.)
 
-- [ ] **Step 3: Wire the central handler in `main.zig`**
+- [x] **Step 3: Wire the central handler in `main.zig`**
 
 In `src/main.zig`, add the errors import near the top imports:
 ```zig
@@ -624,7 +626,7 @@ with:
     }
 ```
 
-- [ ] **Step 4: Verify the build and full test suite**
+- [x] **Step 4: Verify the build and full test suite**
 
 Run: `zig build test --summary all`
 Expected: PASS — all existing tests (11 + the new ones from Tasks 1–2) pass.
@@ -632,7 +634,7 @@ Expected: PASS — all existing tests (11 + the new ones from Tasks 1–2) pass.
 Run: `zig build`
 Expected: builds `tip` with no errors.
 
-- [ ] **Step 5: Manually verify runtime behavior + exit codes**
+- [x] **Step 5: Manually verify runtime behavior + exit codes**
 
 Run:
 ```bash
@@ -642,7 +644,7 @@ zig build run -- task show --id=zzzzzzzz ; echo "exit=$?"
 ```
 Expected: the add succeeds; `--list` shows the task with a ULID prefix under `ID:`; the bad `show` prints `error: no task found matching that id` and reports `exit=3`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/core/task.zig src/main.zig

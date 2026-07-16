@@ -6,7 +6,7 @@
 
 **Architecture:** A new `src/core/query.zig` module defines `TaskQuery`, `DueFilter`, `TaskStats`, and a SQL WHERE clause builder. The `Vault.Tasks` handle (SP03) gets `list(query)` and `stats(query)` methods. The CLI layer in `task.zig` extends `TaskArgs` with filter flags and adds a `stats` subcommand. FTS5 is set up via a migration.
 
-**Tech Stack:** Zig 0.16 (`std.Io` async model), `zig-sqlite`, `flags` dependency, SQLite FTS5.
+**Tech Stack:** Zig 0.16 (`std.Io` async model), `zqlite`, `flags` dependency, SQLite FTS5.
 
 **Dependency:** This plan requires **sub-projects 01–07 to be implemented first** — it relies on the `Vault` handle from SP03, task CRUD from SP03/SP04, vaults from SP06, config from SP05, and the SQLite migration runner from SP02.
 
@@ -19,7 +19,7 @@
 - **Error taxonomy (sub-project 01):** `TaskNotFound`, `AmbiguousPrefix`, `StorageFailure`, `EmptyTitle`, `InvalidFilterValue`, `FtsUnavailable`. Commands return errors; `main.zig` renders via `errors.describe`/`errors.exit_code`.
 - **Exit codes:** `0` ok · `1` internal · `2` usage · `3` not found · `4` validation.
 - **Vault handle (SP03):** `Vault.open(allocator, io, .{ .name = name })` → `Vault`, `vault.tasks` → `Tasks` handle with methods `add()`, `list()`, `edit()`, `delete()`, `show()`, `complete()`, `start()`.
-- **zig-sqlite API:** `Db.init(.{ .mode = .{ .Memory = {} } })` for in-memory, `db.exec(sql, params, .{})` for statements, `db.one(T, sql, params, .{ .allocator = allocator })` for single-row, `db.all(T, sql, params, .{ .allocator = allocator })` for multi-row.
+- **zqlite API:** `zqlite.open(path, flags)` for connections, `conn.exec(sql, params)` for statements, `conn.row(sql, params)` returns `?Row` for single-row, `conn.rows(sql, params)` returns `Rows` for multi-row. Column access: `row.int(0)`, `row.text(1)`, etc.
 - **FTS5:** Requires SQLite built with `SQLITE_ENABLE_FTS5` (standard in most distributions).
 - **Tests:** `zig build test --summary all` from repo root. Tests use in-memory SQLite.
 - **Filters compose as AND.** No flags → all tasks (unchanged).
@@ -450,7 +450,7 @@ git commit -m "feat: add TaskQuery, DueFilter, TaskStats, SQL builder, and match
 - Modify: `src/core/vault.zig` (the SP03 Vault handle — add `list` and `stats` methods to `Vault.Tasks`)
 
 **Interfaces:**
-- Consumes: `query.TaskQuery`, `query.WhereClause`, `query.TaskStats`, `query.build_where_clause`, `sqlite.Db` from vault handle.
+- Consumes: `query.TaskQuery`, `query.WhereClause`, `query.TaskStats`, `query.build_where_clause`, `zqlite.Conn` from vault handle.
 - Produces:
   - `pub fn list(self: *Tasks, query: query.TaskQuery, allocator: std.mem.Allocator) ![]models.Task`
   - `pub fn stats(self: *Tasks, query: query.TaskQuery) !query.TaskStats`
@@ -561,11 +561,11 @@ pub fn list(self: *Tasks, q: query.TaskQuery, allocator: std.mem.Allocator) ![]m
     }
     try sql.appendSlice(" ORDER BY created_at DESC");
 
-    return try self.vault.db.all(models.Task, sql.items, wc.params, .{ .allocator = allocator });
+    return try self.vault.db.rows(sql.items, wc.params);
 }
 ```
 
-The `BindParam` type and `WhereClause` struct are defined in `query.zig` (Task 1). zig-sqlite's `all()` accepts `[]const BindParam` natively.
+The `BindParam` type and `WhereClause` struct are defined in `query.zig` (Task 1). zqlite's `rows()` accepts `[]const BindParam` natively.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -633,11 +633,11 @@ pub fn stats(self: *Tasks, q: query.TaskQuery) !query.TaskStats {
 
     const base_from = "FROM tasks" ++ if (wc.sql.len > 0) " WHERE " ++ wc.sql else "";
 
-    const total = try self.vault.db.one(usize, "SELECT COUNT(*) " ++ base_from, wc.params, .{});
+    const total = try self.vault.db.row("SELECT COUNT(*) " ++ base_from, wc.params);
 
     // Per-status counts via GROUP BY
     const StatusRow = struct { status: []const u8, count: usize };
-    const status_rows = try self.vault.db.all(StatusRow, "SELECT status, COUNT(*) AS count " ++ base_from ++ " GROUP BY status", wc.params, .{ .allocator = allocator });
+    const status_rows = try self.vault.db.rows("SELECT status, COUNT(*) AS count " ++ base_from ++ " GROUP BY status", wc.params);
     defer allocator.free(status_rows);
 
     var pending: usize = 0;
@@ -653,7 +653,7 @@ pub fn stats(self: *Tasks, q: query.TaskQuery) !query.TaskStats {
     var overdue_params = std.ArrayList(query.BindParam).init(allocator);
     try overdue_params.appendSlice(allocator, wc.params);
     try overdue_params.append(allocator, .{ .i64 = now });
-    const overdue = try self.vault.db.one(usize, "SELECT COUNT(*) " ++ base_from ++ " AND due_date < ? AND status != 'completed'", overdue_params.items, .{});
+    const overdue = try self.vault.db.row("SELECT COUNT(*) " ++ base_from ++ " AND due_date < ? AND status != 'completed'", overdue_params.items);
 
     return .{
         .total = total,

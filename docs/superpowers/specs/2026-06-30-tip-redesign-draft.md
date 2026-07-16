@@ -59,7 +59,7 @@ ARCHITECTURE.md, CLI_REFERENCE.md, DOCUMENTATION_INDEX.md, FEATURES.md (1488 lin
 ROADMAP.md, SERVER_API.md, ZIG_IMPLEMENTATION_GUIDE.md (2532 lines).
 
 > ⚠️ **Docs caveat:** ZIG_IMPLEMENTATION_GUIDE.md code uses **old Zig APIs** (`std.fs.cwd()`,
-> `std.json.stringify(writer)`, `ArrayList.init(allocator)`) and references `zig-sqlite` loosely.
+> `std.json.stringify(writer)`, `ArrayList.init(allocator)`) and references `zqlite` loosely.
 > The real code uses the new **0.16 `std.Io`** model. **Do not copy-paste the guide.**
 
 ---
@@ -70,7 +70,7 @@ ROADMAP.md, SERVER_API.md, ZIG_IMPLEMENTATION_GUIDE.md (2532 lines).
 |---|----------|--------|
 | D1 | **SQLite is THE storage backend.** | LOCKED |
 | D2 | **JSON is demoted to export/import ONLY** (no longer a storage mode). | LOCKED |
-| D3 | **zig-sqlite supports Zig 0.16** (issue #204 closed via PR #201/master) → depend on zig-sqlite rather than vendoring the amalgamation + hand-writing a wrapper. Still needs SQLite C source + `linkLibC` (handled by its build.zig). | LOCKED |
+| D3 | **zqlite** (karlseguin/zqlite.zig) is the SQLite dependency. Bundles its own sqlite3.c amalgamation — no system libsqlite3 or link_libc needed by the consumer. | LOCKED |
 | D4 | Build **all scopes**, but as **many small implementation plans as possible**, each with checkboxes. | LOCKED |
 | D5 | Do sub-project **00 (naming charter) first**, **design only** — no code yet. Flow per item: design → rename-where-needed → redesign → spec → plan → next. | LOCKED |
 | D6 | **Identifier casing = snake_case for functions** (option B). User explicitly prefers snake_case. | LOCKED |
@@ -334,13 +334,13 @@ try vault.tasks.complete(id);
 
 - **Zig version:** `/usr/local/zig` → **0.16.0**. `minimum_zig_version = "0.16.0"` in build.zig.zon.
 - **Tests:** 11/11 pass (`zig build test --summary all`).
-- **zig-sqlite + 0.16:** issue [#204](https://github.com/vrischmann/zig-sqlite/issues/204) is
-  **CLOSED**; PR #201 / master build on 0.16. Install via
-  `zig fetch --save git+https://github.com/vrischmann/zig-sqlite`, then in build.zig:
-  `const sqlite = b.dependency("sqlite", .{...}); exe.root_module.addImport("sqlite", sqlite.module("sqlite"));`
+- **zqlite** ([karlseguin/zqlite.zig](https://github.com/karlseguin/zqlite.zig)) — lightweight Zig wrapper
+  around SQLite. Bundles its own sqlite3.c amalgamation (no system libsqlite3 needed). Install via
+  `zig fetch --save git+https://github.com/karlseguin/zqlite.zig`, then in build.zig:
+  `const zqlite_dep = b.dependency("zqlite", .{...}); exe.root_module.addImport("zqlite", zqlite_dep.module("zqlite"));`
 - SQLite is **public domain** (vendoring also fine if we ever drop the wrapper).
-- zig-sqlite maintainer is on a break but keeps it building for latest Zig; it offers comptime
-  bind-param checks + struct row mapping.
+- zqlite provides comptime bind-param checks via struct field names, `Row`/`Rows` iterators,
+  `Blob` marker type, and a `Pool` for thread-safe connection pooling.
 
 ---
 

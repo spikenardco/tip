@@ -6,9 +6,9 @@
 
 **Architecture:** A new `src/crypto/` module wraps `std.crypto` (AES-256-GCM + Argon2id from Zig std). A `src/crypto/session.zig` manages on-disk session files (`~/.tip/sessions/<vault_id>.key`). The Vault handle gains encrypt/decrypt/unlock/lock/status methods. A migration adds nullable `key_salt`/`key_hash` columns to the vaults table.
 
-**Tech Stack:** Zig 0.16 (`std.Io` async model), `std.crypto.aead.aes_gcm.Aes256Gcm`, `std.crypto.pwhash.argon2`, zig-sqlite, SQLite.
+**Tech Stack:** Zig 0.16 (`std.Io` async model), `std.crypto.aead.aes_gcm.Aes256Gcm`, `std.crypto.pwhash.argon2`, zqlite, SQLite.
 
-**Dependency:** This plan requires **sub-projects 01–09 to be implemented first** — it relies on the Vault handle from SP03/SP06, vaults table from SP06, config system from SP05, SQLite migration runner from SP02, error taxonomy from SP01, and zig-sqlite from SP02.
+**Dependency:** This plan requires **sub-projects 01–09 to be implemented first** — it relies on the Vault handle from SP03/SP06, vaults table from SP06, config system from SP05, SQLite migration runner from SP02, error taxonomy from SP01, and zqlite from SP02.
 
 ---
 
@@ -720,7 +720,7 @@ pub const Vault = struct {
     io: std.Io,
     id: []const u8,
     name: []const u8,
-    db: *zig_sqlite.Db,
+    db: *zqlite.Conn,
     session_dir: []const u8,
 
     // Existing sub-handles (from SP03/SP06)...

@@ -917,34 +917,34 @@ const std = @import("std");
 const core = @import("../core/types.zig");
 const Storage = @import("interface.zig").Storage;
 
-// Use zig-sqlite wrapper via build system (addTranslateC or dependency module).
-// zig-sqlite supports Zig 0.16 as of PR #201.
-const sqlite = @import("sqlite");
+// Use zqlite wrapper via build system (addTranslateC or dependency module).
+// zqlite bundles its own sqlite3.c amalgamation.
+const zqlite = @import("zqlite");
 
 pub const SqliteStorage = struct {
     allocator: std.mem.Allocator,
-    db: *sqlite.Db,
+    db: *zqlite.Conn,
     
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, db_path: []const u8) !SqliteStorage {
-        var db = try sqlite.Db.open(io, db_path);
-        errdefer db.close(io);
+    pub fn init(allocator: std.mem.Allocator, db_path: []const u8) !SqliteStorage {
+        var db = try zqlite.open(db_path, zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
+        errdefer db.close();
         
         var storage = SqliteStorage{
             .allocator = allocator,
             .db = db,
         };
         
-        try storage.initSchema(io);
+        try storage.initSchema();
         
         return storage;
     }
     
-    pub fn deinit(self: *SqliteStorage, io: std.Io) void {
-        self.db.close(io);
+    pub fn deinit(self: *SqliteStorage) void {
+        self.db.close();
     }
     
-    fn initSchema(self: SqliteStorage, io: std.Io) !void {
-        try self.db.exec(io,
+    fn initSchema(self: SqliteStorage) !void {
+        try self.db.exec(
             \\ CREATE TABLE IF NOT EXISTS vaults (
             \\   id TEXT PRIMARY KEY,
             \\   name TEXT NOT NULL,
@@ -953,7 +953,8 @@ pub const SqliteStorage = struct {
             \\   created_at INTEGER NOT NULL,
             \\   updated_at INTEGER NOT NULL
             \\ );
-            \\
+        , .{});
+        try self.db.exec(
             \\ CREATE TABLE IF NOT EXISTS passwords (
             \\   id TEXT PRIMARY KEY,
             \\   vault_id TEXT NOT NULL,
@@ -967,7 +968,8 @@ pub const SqliteStorage = struct {
             \\   updated_at INTEGER NOT NULL,
             \\   FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
             \\ );
-            \\
+        , .{});
+        try self.db.exec(
             \\ CREATE TABLE IF NOT EXISTS tasks (
             \\   id TEXT PRIMARY KEY,
             \\   vault_id TEXT NOT NULL,
@@ -980,14 +982,13 @@ pub const SqliteStorage = struct {
             \\   updated_at INTEGER NOT NULL,
             \\   FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
             \\ );
-        , .{}, .{});
+        , .{});
     }
     
-    pub fn createVault(self: SqliteStorage, io: std.Io, vault: *const core.Vault) !void {
-        try self.db.exec(io,
-            "INSERT INTO vaults (id, name, description, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            .{},
-            .{},
+    pub fn createVault(self: SqliteStorage, vault: *const core.Vault) !void {
+        try self.db.exec(
+            "INSERT INTO vaults (id, name, description, owner_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            .{ vault.id, vault.name, vault.description, vault.owner_id, vault.created_at, vault.updated_at },
         );
     }
     

@@ -1,5 +1,7 @@
 # Naming Charter Renames Implementation Plan
 
+> **Status:** COMPLETE (Tasks 0–5). Task 6 pending (draft spec checkbox update).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Apply the sub-project 00 naming charter (D6–D10) to the existing task code as pure renames, changing zero behavior.
@@ -24,7 +26,7 @@
 **Files:**
 - None (verification only)
 
-- [ ] **Step 1: Run the full suite to confirm the starting state**
+- [x] **Step 1: Run the full suite to confirm the starting state**
 
 Run: `zig build test --summary all`
 Expected: PASS, 11/11 tests passing. If it is not green here, stop and report before making any rename.
@@ -41,7 +43,7 @@ The enum holds ANSI escape choices (including `reset`, which is not a color), an
 **Interfaces:**
 - Produces: `const Ansi = enum {...}`, `fn ansi_code(c: Ansi) []const u8`. `fn priority_color(...) Ansi` and `fn status_color(...) Ansi` now return `Ansi`.
 
-- [ ] **Step 1: Rename the enum declaration**
+- [x] **Step 1: Rename the enum declaration**
 
 In `src/core/task.zig`, change:
 
@@ -67,7 +69,7 @@ const Ansi = enum {
 };
 ```
 
-- [ ] **Step 2: Rename the function and its parameter type**
+- [x] **Step 2: Rename the function and its parameter type**
 
 Change:
 
@@ -83,13 +85,13 @@ fn ansi_code(c: Ansi) []const u8 {
     return switch (c) {
 ```
 
-- [ ] **Step 3: Update the two return types that reference the enum**
+- [x] **Step 3: Update the two return types that reference the enum**
 
 Change `fn priority_color(priority: ?models.Task.Priority) Color {` to `fn priority_color(priority: ?models.Task.Priority) Ansi {`.
 
 Change `fn status_color(status: models.Task.Status) Color {` to `fn status_color(status: models.Task.Status) Ansi {`.
 
-- [ ] **Step 4: Update every `color(...)` call site**
+- [x] **Step 4: Update every `color(...)` call site**
 
 Replace all remaining calls to `color(` with `ansi_code(` in `src/core/task.zig`. These are on lines around 223, 231, 239, 248, 252, 262, 265, 302, 309, 315, 317, 323, 327. For example `color(.cyan)` becomes `ansi_code(.cyan)`, and `color(c_status)` becomes `ansi_code(c_status)`.
 
@@ -98,12 +100,12 @@ Verify none remain:
 Run: `rg -n "\bColor\b|\bcolor\(" src/core/task.zig`
 Expected: no matches.
 
-- [ ] **Step 5: Run the suite to confirm it still passes**
+- [x] **Step 5: Run the suite to confirm it still passes**
 
 Run: `zig build test --summary all`
 Expected: PASS, 11/11.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/core/task.zig
@@ -122,7 +124,7 @@ It returns a glyph (`↑ / - / ↓`), not a label. This mirrors the existing `st
 **Interfaces:**
 - Produces: `fn priority_glyph(priority: ?models.Task.Priority) []const u8`.
 
-- [ ] **Step 1: Rename the function declaration**
+- [x] **Step 1: Rename the function declaration**
 
 Change:
 
@@ -136,7 +138,7 @@ to:
 fn priority_glyph(priority: ?models.Task.Priority) []const u8 {
 ```
 
-- [ ] **Step 2: Update both call sites**
+- [x] **Step 2: Update both call sites**
 
 Line ~265: change `priority_label(p)` to `priority_glyph(p)`.
 Line ~304: change `priority_label(p)` to `priority_glyph(p)`.
@@ -146,12 +148,12 @@ Verify none remain:
 Run: `rg -n "priority_label" src/core/task.zig`
 Expected: no matches.
 
-- [ ] **Step 3: Run the suite**
+- [x] **Step 3: Run the suite**
 
 Run: `zig build test --summary all`
 Expected: PASS, 11/11.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/core/task.zig
@@ -170,7 +172,7 @@ Shorter and clearer for a function that returns the current time in seconds.
 **Interfaces:**
 - Produces: `fn now_seconds(io: std.Io) i64`.
 
-- [ ] **Step 1: Rename the function declaration**
+- [x] **Step 1: Rename the function declaration**
 
 Change:
 
@@ -188,7 +190,7 @@ fn now_seconds(io: std.Io) i64 {
 }
 ```
 
-- [ ] **Step 2: Update every call site**
+- [x] **Step 2: Update every call site**
 
 Replace all `unix_timestamp(io)` with `now_seconds(io)` in `src/core/task.zig`. These are on lines around 185, 271, 313, 344, 345, 378.
 
@@ -197,12 +199,12 @@ Verify none remain:
 Run: `rg -n "unix_timestamp" src/core/task.zig`
 Expected: no matches.
 
-- [ ] **Step 3: Run the suite**
+- [x] **Step 3: Run the suite**
 
 Run: `zig build test --summary all`
 Expected: PASS, 11/11.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/core/task.zig
@@ -223,7 +225,7 @@ The function dispatches one command, so the plural verb is misleading. The param
 - Consumes: `main.zig` calls this function.
 - Produces: `pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: TaskArgs) void`.
 
-- [ ] **Step 1: Rename the function declaration and parameter**
+- [x] **Step 1: Rename the function declaration and parameter**
 
 In `src/core/task.zig`, change:
 
@@ -237,7 +239,7 @@ to:
 pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: TaskArgs) void {
 ```
 
-- [ ] **Step 2: Update uses of `T` inside the function body**
+- [x] **Step 2: Update uses of `T` inside the function body**
 
 Change `if (T.list) {` to `if (args.list) {`.
 Change `if (T.subcommand) |subcommand| {` to `if (args.subcommand) |subcommand| {`.
@@ -247,7 +249,7 @@ Verify no stray `T.` uses remain in the function:
 Run: `rg -n "\bT\." src/core/task.zig`
 Expected: no matches.
 
-- [ ] **Step 3: Update the call site in main.zig**
+- [x] **Step 3: Update the call site in main.zig**
 
 In `src/main.zig`, change:
 
@@ -261,12 +263,12 @@ to:
         .task => |t| task.dispatch_task_command(init.io, init.minimal.environ, t),
 ```
 
-- [ ] **Step 4: Run the suite**
+- [x] **Step 4: Run the suite**
 
 Run: `zig build test --summary all`
 Expected: PASS, 11/11.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/core/task.zig src/main.zig
@@ -285,7 +287,7 @@ The model field is `title`, and `task edit` already uses `--title`. This makes t
 **Interfaces:**
 - Produces: `TaskArgs.subcommand.add` field is now `title: []const u8` (was `name`).
 
-- [ ] **Step 1: Rename the field in the `add` union variant**
+- [x] **Step 1: Rename the field in the `add` union variant**
 
 In `src/core/task.zig`, change:
 
@@ -305,7 +307,7 @@ to:
         },
 ```
 
-- [ ] **Step 2: Update the dispatch use of the field**
+- [x] **Step 2: Update the dispatch use of the field**
 
 Change:
 
@@ -319,7 +321,7 @@ to:
             .add => |add| add_task(allocator, io, dir, add.title, add.desc) catch {
 ```
 
-- [ ] **Step 3: Update the help text**
+- [x] **Step 3: Update the help text**
 
 In the `TaskArgs.help` block, change the add line:
 
@@ -345,22 +347,22 @@ to:
         \\  tip task add --title="Review code"
 ```
 
-- [ ] **Step 4: Confirm no `name` flag references remain**
+- [x] **Step 4: Confirm no `name` flag references remain**
 
 Run: `rg -n "add.name|--name|name=" src/core/task.zig`
 Expected: no matches.
 
-- [ ] **Step 5: Run the suite**
+- [x] **Step 5: Run the suite**
 
 Run: `zig build test --summary all`
 Expected: PASS, 11/11. (The tests call `add_task` directly and are unaffected by the flag rename, so they confirm nothing else broke.)
 
-- [ ] **Step 6: Manually confirm the new flag works end to end**
+- [x] **Step 6: Manually confirm the new flag works end to end**
 
 Run: `zig build run -- task add --title="Review code"`
 Expected: prints `Adding task: Review code` with no parse error.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/core/task.zig

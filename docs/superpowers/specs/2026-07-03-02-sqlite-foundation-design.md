@@ -14,12 +14,12 @@ This sub-project wires SQLite into the build, adds the `db.zig` connection modul
 
 | # | Decision | Status |
 |---|----------|--------|
-| F1 | **zig-sqlite** is the dependency (not vendored amalgamation). | LOCKED |
+| F1 | **zqlite** is the dependency — [karlseguin/zqlite.zig](https://github.com/karlseguin/zqlite.zig), which bundles its own `sqlite3.c` amalgamation. | LOCKED |
 | F2 | **Embedded `.sql` files** via `@embedFile`, not read from disk. | LOCKED |
 | F3 | **Simple version-counter** in `_schema_version` table (`INTEGER`). | LOCKED |
 | F4 | **Migrations numbered `NNN_*.sql`** in `src/internal/database/migrations/`. | LOCKED |
 | F5 | **Each migration gets its own transaction.** No cross-migration wrapping. | LOCKED |
-| F6 | **In-memory SQLite** for tests (`sqlite.Db.initMemory()`). | LOCKED |
+| F6 | **In-memory SQLite** for tests (`zqlite.open(":memory:", flags)`). | LOCKED |
 | F7 | **WAL mode** enabled on open (`PRAGMA journal_mode=WAL`). | LOCKED |
 
 ---
@@ -28,14 +28,14 @@ This sub-project wires SQLite into the build, adds the `db.zig` connection modul
 
 ### Dependency
 
-- Run `zig fetch --save git+https://github.com/vrischmann/zig-sqlite` to add to `build.zig.zon`.
+- Run `zig fetch --save git+https://github.com/karlseguin/zqlite.zig` to add to `build.zig.zon`.
 - Import the `sqlite` module in `build.zig` and add it to the exe root module imports.
-- No extra C source management — zig-sqlite's build.zig handles linking `libsqlite3`.
+- zqlite bundles its own `sqlite3.c` amalgamation and compiles it as a static library. No system sqlite3 dependency needed.
 
 ### Test wiring
 
 - The auto-test-runner already globs `src/**/*.zig` — new files under `src/internal/database/` are picked up automatically.
-- Tests use `sqlite.Db.initMemory()` — no temp files needed.
+- Tests use `zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode)` — no temp files needed.
 
 ---
 
@@ -44,7 +44,7 @@ This sub-project wires SQLite into the build, adds the `db.zig` connection modul
 Single function:
 
 ```zig
-pub fn open(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Environ) !*sqlite.Db
+pub fn open(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Environ) !zqlite.Conn
 ```
 
 - Resolves the platform data directory (same pattern as `storage.json.open_data_dir`):
@@ -52,8 +52,8 @@ pub fn open(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Envir
   - macOS: `~/Library/Application Support/tip`
   - Windows: `%APPDATA%/tip`
 - Database file: `tip.db`
-- Opens with `sqlite.Db.init(...)`, enables WAL mode via `PRAGMA journal_mode=WAL`.
-- Returns `*sqlite.Db` — caller owns and must `db.deinit()`.
+- Opens with `zqlite.open(path, flags)`, enables WAL mode via `PRAGMA journal_mode=WAL`.
+- Returns `zqlite.Conn` — caller owns and must `db.deinit()`.
 - No connection pooling (single-process CLI).
 
 ---
@@ -94,7 +94,7 @@ The Tasks table schema and real data migrations are added in sub-project 03.
 
 ## Part D — Testing
 
-All tests use `sqlite.Db.initMemory()`:
+All tests use `zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode)`:
 
 - **`migrations run from scratch`** — open in-memory, run migrations, verify `_schema_version.version == 1`.
 - **`migrations are idempotent`** — run twice, no error, version stays 1.

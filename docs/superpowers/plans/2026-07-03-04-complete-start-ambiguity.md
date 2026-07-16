@@ -94,11 +94,11 @@ test "complete dispatch marks task completed" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
-    defer db.deinit();
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer db.close();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -117,11 +117,11 @@ test "start dispatch marks task in_progress" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
-    defer db.deinit();
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer db.close();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
@@ -142,11 +142,11 @@ test "ambiguous prefix includes count" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    var db = try sqlite.Db.init(.{ .mode = .{ .Memory = {} } });
-    defer db.deinit();
+    var db = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer db.close();
 
-    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{}, .{});
-    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{}, .{});
+    try db.exec("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', priority TEXT, due_date INTEGER, assigned_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, completed_at INTEGER)", .{});
+    try db.exec("CREATE INDEX idx_tasks_status ON tasks(status)", .{});
 
     var vault = Vault{ .db = &db, .io = io, .tasks = .{ .vault = undefined } };
     vault.tasks = .{ .vault = &vault };
