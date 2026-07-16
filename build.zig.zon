@@ -8,9 +8,9 @@
             .url = "git+https://github.com/spikenardco/flags.zig#d59be9f6f188a26e8af6959ce8c05e305458686b",
             .hash = "flags-0.2.1-GjWK4inSAADhRL56XvkAh12bCDB_DDNHVAHVk2usi1nb",
         },
-        .sqlite = .{
-            .url = "git+https://github.com/vrischmann/zig-sqlite#946d77c526258760b52836187af32d1a192c5d36",
-            .hash = "sqlite-3.48.0-F2R_azCQDgBGaWDIX4g2vxKpuqzYEQOOfAeJGMNocPu0",
+        .zqlite = .{
+            .url = "git+https://github.com/karlseguin/zqlite.zig?ref=master#a9c1cd3657315306856ddf4a8a28a11b10fd5a9d",
+            .hash = "zqlite-0.0.1-RWLaYyc7nABTzVzEpEMPi3qD8xJHi0a2ycNgL73XyEdt",
         },
     },
     .paths = .{

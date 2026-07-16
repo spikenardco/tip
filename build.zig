@@ -9,10 +9,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }).module("flags");
 
-    const sqlite = b.dependency("sqlite", .{
+    const zqlite = b.dependency("zqlite", .{
         .target = target,
         .optimize = optimize,
-    }).module("sqlite");
+    }).module("zqlite");
 
     const manifest = std.zon.parse.fromSliceAlloc(
         struct { version: []const u8 },
@@ -37,7 +37,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "flags", .module = flags },
                 .{ .name = "version", .module = version_module },
-                .{ .name = "sqlite", .module = sqlite },
+                .{ .name = "zqlite", .module = zqlite },
             },
         }),
     });
@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) void {
     // directory. The `_ = @import("src/...")` lines then resolve by relative
     // path, and nothing lands in the project tree.
     const test_dir = b.addWriteFiles();
-    _ = test_dir.addCopyDirectory(b.path("src"), "src", .{ .include_extensions = &.{".zig"} });
+    _ = test_dir.addCopyDirectory(b.path("src"), "src", .{ .include_extensions = &.{ ".zig", ".sql" } });
     const test_root = test_dir.add("tests.zig", test_source);
 
     const all_tests = b.addTest(.{
@@ -67,6 +67,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = test_root,
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zqlite", .module = zqlite },
+            },
         }),
     });
 
