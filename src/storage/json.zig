@@ -1,41 +1,5 @@
 const std = @import("std");
 const models = @import("../core/models.zig");
-const builtin = @import("builtin");
-
-/// Opens (or creates) the platform-specific data directory for storing app data.
-///
-/// Platform paths:
-///   Linux   - $XDG_DATA_HOME/tip  or  ~/.local/share/tip
-///   macOS   - ~/Library/Application Support/tip
-///   Windows - %APPDATA%/tip
-pub fn open_data_dir(
-    allocator: std.mem.Allocator,
-    io: std.Io,
-    environ: std.process.Environ,
-) !std.Io.Dir {
-    const base = switch (builtin.os.tag) {
-        .linux => blk: {
-            if (environ.getPosix("XDG_DATA_HOME")) |xdg| {
-                break :blk try std.fs.path.join(allocator, &.{ xdg, "tip" });
-            }
-            const home = environ.getPosix("HOME") orelse return error.HomeDirMissing;
-            break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "tip" });
-        },
-        .macos => blk: {
-            const home = environ.getPosix("HOME") orelse return error.HomeDirMissing;
-            break :blk try std.fs.path.join(allocator, &.{ home, "Library", "Application Support", "tip" });
-        },
-        .windows => blk: {
-            const appdata = environ.getAlloc(allocator, "APPDATA") catch return error.AppDataDirUnavailable;
-            defer allocator.free(appdata);
-            break :blk try std.fs.path.join(allocator, &.{ appdata, "tip" });
-        },
-        else => @compileError("unsupported OS"),
-    };
-    defer allocator.free(base);
-
-    return try std.Io.Dir.cwd().createDirPathOpen(io, base, .{});
-}
 
 /// Loads tasks from the JSON file. Parsed data is owned by the given allocator
 /// (pass an arena allocator for batch-free cleanup).

@@ -3,10 +3,90 @@ const models = @import("models.zig");
 const storage = @import("../storage/dir.zig");
 const generate = @import("../utils/generate.zig");
 const ansi = @import("../utils/ansi.zig");
+const vault = @import("./vault.zig");
+const zqlite = @import("zqlite");
 
 fn now_seconds(io: std.Io) i64 {
     return std.Io.Timestamp.now(io, .real).toSeconds();
 }
+
+pub const AddFields = struct {
+    title: []const u8,
+    description: ?[]const u8 = null,
+    priority: ?[]const u8 = null,
+    due_date: ?i64 = null,
+    assigned_to: ?[]const u8 = null,
+};
+
+pub const EditFields = struct {
+    title: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+    priority: ?[]const u8 = null,
+    due_date: ?i64 = null,
+    assigned_to: ?[]const u8 = null,
+};
+
+pub const Tasks = struct {
+    db: *zqlite.Conn,
+    io: std.Io,
+
+    fn parse_status(text: []const u8) models.Task.Status {
+        if (std.mem.eql(u8, text, "in_progress")) return .in_progress;
+        if (std.mem.eql(u8, text, "completed")) return .completed;
+        return .pending;
+    }
+
+    fn parse_priority(text: []const u8) ?models.Task.Priority {
+        if (std.mem.eql(u8, text, "low")) return .low;
+        if (std.mem.eql(u8, text, "medium")) return .medium;
+        if (std.mem.eql(u8, text, "high")) return .high;
+        return null;
+    }
+
+    fn scan_task(row: zqlite.Row) models.Task {
+        return .{
+            .id = row.text(0),
+            .title = row.text(1),
+            .description = row.nullableText(2),
+            .status = parse_status(row.text(3)),
+            .priority = if (row.nullableText(4)) |p| parse_priority(p) else null,
+            .due_date = row.get(?i64, 5),
+            .assigned_to = row.nullableText(6),
+            .created_at = row.int(7),
+            .updated_at = row.get(?i64, 8),
+            .completed_at = row.get(?i64, 9),
+        };
+    }
+
+    pub fn add(self: *Tasks, args: AddFields) !models.Task {
+        const id = try generate.generate_id(std.heap.page_allocator, self.io);
+        defer std.heap.page_allocator.free(id);
+
+        const now = std.Io.Timestamp.now(self.io, .real).toSeconds();
+
+        try self.db.exec(
+            "INSERT INTO tasks (id, title, description, status, priority, due_date, assigned_to, created_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
+            .{ id, args.title, args.description, args.priority, args.due_date, args.assigned_to, now },
+        );
+
+        // Read back to return a fully populated struct
+        const row = (try self.db.row("SELECT * FROM tasks WHERE id = ?", .{id})) orelse return error.StorageFailure;
+        return scan_task(row);
+    }
+
+    pub fn list(self: *Tasks, allocator: std.mem.Allocator) ![]models.Task {
+        var result = try self.db.rows("SELECT * FROM tasks ORDER BY created_at ASC", .{});
+        defer result.deinit();
+
+        var tasks = std.ArrayList(models.Task).empty;
+        errdefer tasks.deinit(allocator);
+
+        while (try result.next()) |row| {
+            try tasks.append(allocator, scan_task(row));
+        }
+        return try tasks.toOwnedSlice(allocator);
+    }
+};
 
 pub const TaskArgs = struct {
     list: bool = false,
@@ -15,17 +95,17 @@ pub const TaskArgs = struct {
             title: []const u8,
             desc: ?[]const u8 = null,
         },
-        edit: struct {
-            id: []const u8,
-            title: []const u8,
-            desc: ?[]const u8 = null,
-        },
-        delete: struct {
-            id: []const u8,
-        },
-        show: struct {
-            id: []const u8,
-        },
+        // edit: struct {
+        //     id: []const u8,
+        //     title: []const u8,
+        //     desc: ?[]const u8 = null,
+        // },
+        // delete: struct {
+        //     id: []const u8,
+        // },
+        // show: struct {
+        //     id: []const u8,
+        // },
     } = null,
 
     pub const help =
@@ -60,24 +140,27 @@ pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: Tas
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var dir = storage.open_data_dir(allocator, io, environ) catch return error.StorageFailure;
-    defer dir.close(io);
+    var v = vault.Vault.open(allocator, io, environ) catch return error.StorageFailure;
+    defer v.close();
 
-    if (args.list) return list_task(allocator, io, dir);
+    // var dir = storage.open_data_dir(allocator, io, environ) catch return error.StorageFailure;
+    // defer dir.close(io);
+
+    // if (args.list) return list_task(allocator, io, dir);
 
     if (args.subcommand) |subcommand| {
         switch (subcommand) {
-            .add => |a| try add_task(allocator, io, dir, a.title, a.desc),
-            .edit => |e| try edit_task(allocator, io, dir, e.id, e.title, e.desc orelse ""),
-            .delete => |del| try delete_task(allocator, io, del.id, dir),
-            .show => |s| try show_task(allocator, io, s.id, dir),
+            .add => |a| _ = try v.tasks.add(.{ .title = a.title, .description = a.desc }),
+            // .edit => |e| try edit_task(allocator, io, dir, e.id, e.title, e.desc orelse ""),
+            // .delete => |del| try delete_task(allocator, io, del.id, dir),
+            // .show => |s| try show_task(allocator, io, s.id, dir),
         }
     } else {
         std.debug.print("{s}\n", .{TaskArgs.help});
     }
 }
 
-fn add_task(
+pub fn add_task(
     allocator: std.mem.Allocator,
     io: std.Io,
     dir: std.Io.Dir,
@@ -110,7 +193,7 @@ fn add_task(
     storage.save_tasks(arena.allocator(), io, dir, tasks.items) catch return error.StorageFailure;
 }
 
-fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
+pub fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -247,7 +330,7 @@ fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
     }
 }
 
-fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
+pub fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -266,7 +349,7 @@ fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, 
     return error.TaskNotFound;
 }
 
-fn edit_task(
+pub fn edit_task(
     allocator: std.mem.Allocator,
     io: std.Io,
     dir: std.Io.Dir,
@@ -298,7 +381,7 @@ fn edit_task(
     return error.TaskNotFound;
 }
 
-fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
+pub fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
