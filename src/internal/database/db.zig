@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const zqlite = @import("zqlite");
 
 // pub const Database = struct {
@@ -20,36 +19,9 @@ const zqlite = @import("zqlite");
 //     }
 // };
 
-/// Opens (or creates) the SQLite database at the platform data directory.
+/// Opens (or creates) the SQLite database at the given path.
 /// WAL mode is enabled for better concurrent-read performance.
-pub fn open(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Environ) !zqlite.Conn {
-    const base = switch (builtin.os.tag) {
-        .linux => blk: {
-            if (environ.getPosix("XDG_DATA_HOME")) |xdg| {
-                break :blk try std.fs.path.joinZ(allocator, &.{ xdg, "tip" });
-            }
-            const home = environ.getPosix("HOME") orelse return error.HomeDirMissing;
-            break :blk try std.fs.path.joinZ(allocator, &.{ home, ".local", "share", "tip" });
-        },
-        .macos => blk: {
-            const home = environ.getPosix("HOME") orelse return error.HomeDirMissing;
-            break :blk try std.fs.path.joinZ(allocator, &.{ home, "Library", "Application Support", "tip" });
-        },
-        .windows => blk: {
-            const appdata = environ.getAlloc(allocator, "APPDATA") catch return error.AppDataDirUnavailable;
-            defer allocator.free(appdata);
-            break :blk try std.fs.path.joinZ(allocator, &.{ appdata, "tip" });
-        },
-        else => @compileError("unsupported OS"),
-    };
-    defer allocator.free(base);
-
-    try std.Io.Dir.cwd().createDirPath(io, base);
-
-    const db_path = try std.fs.path.joinZ(allocator, &.{ base, "tip.db" });
-    defer allocator.free(db_path);
-
-    // good idea to pass EXResCode to get extended result codes (more detailed error codes)
+pub fn open(db_path: [:0]const u8) !zqlite.Conn {
     const flags = zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode;
     var conn = try zqlite.open(db_path, flags);
 
