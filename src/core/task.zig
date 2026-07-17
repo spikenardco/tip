@@ -1,6 +1,6 @@
 const std = @import("std");
 const models = @import("models.zig");
-const storage = @import("../storage/dir.zig");
+const storage = @import("../storage/json.zig");
 const generate = @import("../utils/generate.zig");
 const ansi = @import("../utils/ansi.zig");
 const vault = @import("./vault.zig");
