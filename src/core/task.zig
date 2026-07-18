@@ -135,12 +135,12 @@ pub const TaskArgs = struct {
     ;
 };
 
-pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: TaskArgs) !void {
+pub fn dispatch_task_command(io: std.Io, data_path: []const u8, args: TaskArgs) !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var v = vault.Vault.open(allocator, io, environ) catch return error.StorageFailure;
+    var v = vault.Vault.open(allocator, io, data_path) catch return error.StorageFailure;
     defer v.close();
 
     // var dir = storage.open_data_dir(allocator, io, environ) catch return error.StorageFailure;

@@ -3,6 +3,7 @@ const version_mod = @import("version");
 const flags = @import("flags");
 const task = @import("core/task.zig");
 const errors = @import("core/errors.zig");
+const storage = @import("storage/dir.zig");
 
 const Args = struct {
     command: union(enum) {
@@ -47,8 +48,10 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(if (err == error.HelpRequested) 0 else 2);
     };
 
+    const data_path = try storage.data_dir_path(allocator, init.minimal.environ);
+
     switch (parsed.command) {
-        .task => |t| task.dispatch_task_command(init.io, init.minimal.environ, t) catch |err| {
+        .task => |t| task.dispatch_task_command(init.io, data_path, t) catch |err| {
             std.debug.print("error: {s}\n", .{errors.describe(err)});
             std.process.exit(errors.exit_code(err));
         },

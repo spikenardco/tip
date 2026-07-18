@@ -2,7 +2,6 @@ const std = @import("std");
 const zqlite = @import("zqlite");
 const models = @import("../core/models.zig");
 const db = @import("../internal/database/db.zig");
-const storage = @import("../storage/dir.zig");
 const generate = @import("../utils/generate.zig");
 const task = @import("./task.zig");
 
@@ -11,13 +10,10 @@ pub const Vault = struct {
     io: std.Io,
     tasks: task.Tasks,
 
-    pub fn open(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Environ) !Vault {
-        const dir_path = try storage.data_dir_path(allocator, environ);
-        defer allocator.free(dir_path);
+    pub fn open(allocator: std.mem.Allocator, io: std.Io, data_path: []const u8) !Vault {
+        try std.Io.Dir.cwd().createDirPath(io, data_path);
 
-        try std.Io.Dir.cwd().createDirPath(io, dir_path);
-
-        const db_path = try std.fs.path.joinZ(allocator, &.{ dir_path, "tip.db" });
+        const db_path = try std.fs.path.joinZ(allocator, &.{ data_path, "tip.db" });
         defer allocator.free(db_path);
 
         const conn = try allocator.create(zqlite.Conn);
