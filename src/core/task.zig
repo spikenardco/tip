@@ -246,6 +246,7 @@ fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
     const c_status = ansi.status_color(task.status);
     const c_reset = ansi.ansi_code(.reset);
     const compact_id = if (task.id.len > 8) task.id[0..8] else task.id;
+    const now = now_seconds(io);
 
     if (detailed) {
         std.debug.print("{s}=== Task Details ==={s}\n\n", .{ ansi.ansi_code(.cyan), c_reset });
@@ -267,7 +268,6 @@ fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
         }
 
         if (task.due_date) |due| {
-            const now = now_seconds(io);
             if (due < now) {
                 std.debug.print("Due Date:    {d} (overdue)\n", .{due});
             } else {
@@ -309,7 +309,6 @@ fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
         }
 
         if (task.due_date) |due| {
-            const now = now_seconds(io);
             if (due < now) {
                 std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi.ansi_code(.red), due, c_reset });
             } else {
