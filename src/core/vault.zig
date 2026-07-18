@@ -20,12 +20,13 @@ pub const Vault = struct {
         const db_path = try std.fs.path.joinZ(allocator, &.{ dir_path, "tip.db" });
         defer allocator.free(db_path);
 
-        var database = try db.open(db_path);
+        const conn = try allocator.create(zqlite.Conn);
+        conn.* = try db.open(db_path);
 
         return Vault{
-            .db = &database,
+            .db = conn,
             .io = io,
-            .tasks = .{ .db = &database, .io = io },
+            .tasks = .{ .db = conn, .io = io },
         };
     }
 
