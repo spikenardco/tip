@@ -29,6 +29,7 @@ pub const EditFields = struct {
 pub const Tasks = struct {
     db: *zqlite.Conn,
     io: std.Io,
+    allocator: std.mem.Allocator,
 
     fn parse_status(text: []const u8) models.Task.Status {
         if (std.mem.eql(u8, text, "in_progress")) return .in_progress;
@@ -59,8 +60,8 @@ pub const Tasks = struct {
     }
 
     pub fn add(self: *Tasks, args: AddFields) !models.Task {
-        const id = try generate.generate_id(std.heap.page_allocator, self.io);
-        defer std.heap.page_allocator.free(id);
+        const id = try generate.generate_id(self.allocator, self.io);
+        defer self.allocator.free(id);
 
         const now = std.Io.Timestamp.now(self.io, .real).toSeconds();
 
@@ -74,17 +75,17 @@ pub const Tasks = struct {
         return scan_task(row);
     }
 
-    pub fn list(self: *Tasks, allocator: std.mem.Allocator) ![]models.Task {
+    pub fn list(self: *Tasks) ![]models.Task {
         var result = try self.db.rows("SELECT * FROM tasks ORDER BY created_at ASC", .{});
         defer result.deinit();
 
         var tasks = std.ArrayList(models.Task).empty;
-        errdefer tasks.deinit(allocator);
+        errdefer tasks.deinit(self.allocator);
 
         while (try result.next()) |row| {
-            try tasks.append(allocator, scan_task(row));
+            try tasks.append(self.allocator, scan_task(row));
         }
-        return try tasks.toOwnedSlice(allocator);
+        return try tasks.toOwnedSlice(self.allocator);
     }
 };
 
@@ -135,11 +136,7 @@ pub const TaskArgs = struct {
     ;
 };
 
-pub fn dispatch_task_command(io: std.Io, data_path: []const u8, args: TaskArgs) !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
+pub fn dispatch_task_command(allocator: std.mem.Allocator, io: std.Io, data_path: []const u8, args: TaskArgs) !void {
     var v = vault.Vault.open(allocator, io, data_path) catch return error.StorageFailure;
     defer v.close();
 

@@ -22,7 +22,7 @@ pub const Vault = struct {
         return Vault{
             .db = conn,
             .io = io,
-            .tasks = .{ .db = conn, .io = io },
+            .tasks = .{ .db = conn, .io = io, .allocator = allocator },
         };
     }
 

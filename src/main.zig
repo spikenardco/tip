@@ -51,7 +51,7 @@ pub fn main(init: std.process.Init) !void {
     const data_path = try storage.data_dir_path(allocator, init.minimal.environ);
 
     switch (parsed.command) {
-        .task => |t| task.dispatch_task_command(init.io, data_path, t) catch |err| {
+        .task => |t| task.dispatch_task_command(allocator, init.io, data_path, t) catch |err| {
             std.debug.print("error: {s}\n", .{errors.describe(err)});
             std.process.exit(errors.exit_code(err));
         },
