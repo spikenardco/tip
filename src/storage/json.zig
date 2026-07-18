@@ -1,3 +1,4 @@
+// TODO(#8): delete this file once all functions are migrated to SQLite via the Tasks struct in task.zig.
 const std = @import("std");
 const models = @import("../core/models.zig");
 

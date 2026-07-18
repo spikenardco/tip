@@ -1,6 +1,6 @@
 const std = @import("std");
 const models = @import("models.zig");
-const storage = @import("../storage/json.zig");
+const storage = @import("../storage/json.zig"); // TODO(#3): remove after deleting JSON-backed standalone functions below
 const generate = @import("../utils/generate.zig");
 const ansi = @import("../utils/ansi.zig");
 const vault = @import("./vault.zig");
@@ -96,6 +96,7 @@ pub const TaskArgs = struct {
             title: []const u8,
             desc: ?[]const u8 = null,
         },
+        // TODO(#3): uncomment and wire up as SQLite-backed subcommands via vault.Tasks.{edit,delete,get_by_id}
         // edit: struct {
         //     id: []const u8,
         //     title: []const u8,
@@ -157,6 +158,8 @@ pub fn dispatch_task_command(allocator: std.mem.Allocator, io: std.Io, data_path
     }
 }
 
+// TODO(#6): delete all standalone JSON-backed functions below (add_task through show_task, and their tests).
+// Replace with SQLite dispatch in dispatch_task_command using vault.Tasks.{add,list,get_by_id,edit,delete,complete}.
 pub fn add_task(
     allocator: std.mem.Allocator,
     io: std.Io,

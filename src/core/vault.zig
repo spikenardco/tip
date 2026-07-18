@@ -30,6 +30,7 @@ pub const Vault = struct {
         self.db.close();
     }
 
+    // TODO(#7): uncomment and move get_by_id, edit, delete, complete, start into the Tasks struct in task.zig
     // pub const Tasks = struct {
     //     vault: *Vault,
 
