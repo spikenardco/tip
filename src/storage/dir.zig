@@ -34,6 +34,16 @@ const dir_config: DirConfig = switch (builtin.os.tag) {
 /// Uses a comptime config per platform — no runtime OS branches.
 /// Caller owns the returned memory.
 pub fn data_dir_path(allocator: std.mem.Allocator, environ: std.process.Environ) ![]const u8 {
+    if (builtin.os.tag == .windows) {
+        const appdata = environ.getAlloc(allocator, dir_config.primary_env) catch |err| switch (err) {
+            error.EnvironmentVariableMissing => return error.HomeDirMissing,
+            else => return err,
+        };
+        defer allocator.free(appdata);
+
+        return std.fs.path.join(allocator, &.{ appdata, dir_config.primary_subpath });
+    }
+
     if (environ.getPosix(dir_config.primary_env)) |p| {
         return std.fs.path.join(allocator, &.{ p, dir_config.primary_subpath });
     }
