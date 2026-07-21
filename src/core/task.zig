@@ -1,91 +1,145 @@
 const std = @import("std");
 const models = @import("models.zig");
-const storage = @import("../storage/json.zig"); // TODO(#3): remove after deleting JSON-backed standalone functions below
 const generate = @import("../utils/generate.zig");
 const ansi = @import("../utils/ansi.zig");
-const vault = @import("./vault.zig");
 const zqlite = @import("zqlite");
+const migrate = @import("../internal/database/migrate.zig");
 
 fn now_seconds(io: std.Io) i64 {
     return std.Io.Timestamp.now(io, .real).toSeconds();
 }
 
-pub const AddFields = struct {
+const AddFields = struct {
     title: []const u8,
     description: ?[]const u8 = null,
-    priority: ?[]const u8 = null,
+    priority: ?models.Task.Priority = .low,
     due_date: ?i64 = null,
     assigned_to: ?[]const u8 = null,
 };
 
-pub const EditFields = struct {
+const EditFields = struct {
     title: ?[]const u8 = null,
     description: ?[]const u8 = null,
-    priority: ?[]const u8 = null,
+    priority: ?models.Task.Priority = null,
     due_date: ?i64 = null,
     assigned_to: ?[]const u8 = null,
+    status: ?models.Task.Status = null,
 };
 
 pub const Tasks = struct {
-    db: *zqlite.Conn,
+    conn: zqlite.Conn,
     io: std.Io,
     allocator: std.mem.Allocator,
 
-    fn parse_status(text: []const u8) models.Task.Status {
-        if (std.mem.eql(u8, text, "in_progress")) return .in_progress;
-        if (std.mem.eql(u8, text, "completed")) return .completed;
-        return .pending;
+    fn parse_status(text: []const u8) !models.Task.Status {
+        return std.meta.stringToEnum(models.Task.Status, text) orelse return error.StorageFailure;
     }
 
     fn parse_priority(text: []const u8) ?models.Task.Priority {
-        if (std.mem.eql(u8, text, "low")) return .low;
-        if (std.mem.eql(u8, text, "medium")) return .medium;
-        if (std.mem.eql(u8, text, "high")) return .high;
-        return null;
+        return std.meta.stringToEnum(models.Task.Priority, text);
     }
 
-    fn scan_task(row: zqlite.Row) models.Task {
+    fn scan_task(self: Tasks, row: zqlite.Row) !models.Task {
+        const status = try parse_status(row.text(3));
+        const priority = parse_priority(row.text(4));
+
         return .{
-            .id = row.text(0),
-            .title = row.text(1),
-            .description = row.nullableText(2),
-            .status = parse_status(row.text(3)),
-            .priority = if (row.nullableText(4)) |p| parse_priority(p) else null,
+            .id = try self.allocator.dupe(u8, row.text(0)),
+            .title = try self.allocator.dupe(u8, row.text(1)),
+            .description = if (row.nullableText(2)) |value| try self.allocator.dupe(u8, value) else null,
+            .status = status,
+            .priority = priority,
             .due_date = row.get(?i64, 5),
-            .assigned_to = row.nullableText(6),
+            .assigned_to = if (row.nullableText(6)) |value| try self.allocator.dupe(u8, value) else null,
             .created_at = row.int(7),
             .updated_at = row.get(?i64, 8),
             .completed_at = row.get(?i64, 9),
         };
     }
 
-    pub fn add(self: *Tasks, args: AddFields) !models.Task {
-        const id = try generate.generate_id(self.allocator, self.io);
-        defer self.allocator.free(id);
+    pub fn add(self: Tasks, args: AddFields) !models.Task {
+        if (std.mem.trim(u8, args.title, " \t\n\r").len == 0) return error.EmptyTitle;
 
-        const now = std.Io.Timestamp.now(self.io, .real).toSeconds();
+        const id = (generate.generate_id(self.io))[0..];
+        const now = now_seconds(self.io);
 
-        try self.db.exec(
-            "INSERT INTO tasks (id, title, description, status, priority, due_date, assigned_to, created_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
-            .{ id, args.title, args.description, args.priority, args.due_date, args.assigned_to, now },
+        try self.conn.exec(
+            \\INSERT INTO tasks (
+            \\    id, title, description, status,
+            \\    priority, due_date, assigned_to, created_at
+            \\) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ,
+            .{
+                id,
+                args.title,
+                args.description,
+                @tagName(models.Task.Status.pending),
+                @tagName(args.priority orelse .low),
+                args.due_date,
+                args.assigned_to,
+                now,
+            },
         );
 
-        // Read back to return a fully populated struct
-        const row = (try self.db.row("SELECT * FROM tasks WHERE id = ?", .{id})) orelse return error.StorageFailure;
-        return scan_task(row);
+        const row = (try self.conn.row("SELECT * FROM tasks WHERE id = ?", .{id})) orelse return error.StorageFailure;
+        defer row.deinit();
+
+        return try self.scan_task(row);
     }
 
-    pub fn list(self: *Tasks) ![]models.Task {
-        var result = try self.db.rows("SELECT * FROM tasks ORDER BY created_at ASC", .{});
+    pub fn edit(self: Tasks, id: []const u8, fields: EditFields) !void {
+        if ((try self.conn.row("SELECT id FROM tasks WHERE id = ?", .{id})) == null)
+            return error.TaskNotFound;
+
+        const now = now_seconds(self.io);
+
+        if (fields.title) |v| {
+            try self.conn.exec("UPDATE tasks SET title = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
+        }
+        if (fields.description) |v| {
+            try self.conn.exec("UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
+        }
+        if (fields.priority) |v| {
+            try self.conn.exec("UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?", .{ @tagName(v), now, id });
+        }
+        if (fields.due_date) |v| {
+            try self.conn.exec("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
+        }
+        if (fields.assigned_to) |v| {
+            try self.conn.exec("UPDATE tasks SET assigned_to = ?, updated_at = ? WHERE id = ?", .{ v, now, id });
+        }
+        if (fields.status) |v| {
+            try self.conn.exec("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?", .{ @tagName(v), now, id });
+        }
+    }
+
+    pub fn list(self: Tasks) ![]models.Task {
+        var result = try self.conn.rows("SELECT * FROM tasks ORDER BY created_at ASC", .{});
         defer result.deinit();
 
         var tasks = std.ArrayList(models.Task).empty;
         errdefer tasks.deinit(self.allocator);
 
-        while (try result.next()) |row| {
-            try tasks.append(self.allocator, scan_task(row));
+        while (result.next()) |row| {
+            try tasks.append(self.allocator, try self.scan_task(row));
         }
+
+        if (result.err) |err| return err;
         return try tasks.toOwnedSlice(self.allocator);
+    }
+
+    pub fn delete(self: Tasks, id: []const u8) !void {
+        try self.conn.exec("DELETE FROM tasks WHERE id = ?", .{id});
+
+        if (self.conn.changes() == 0) return error.TaskNotFound;
+    }
+
+    pub fn get(self: *Tasks, id: []const u8) !models.Task {
+        if (try self.conn.row("SELECT * FROM tasks WHERE id = ?", .{id})) |row| {
+            return scan_task(row);
+        }
+
+        return error.TaskNotFound;
     }
 };
 
@@ -96,18 +150,14 @@ pub const TaskArgs = struct {
             title: []const u8,
             desc: ?[]const u8 = null,
         },
-        // TODO(#3): uncomment and wire up as SQLite-backed subcommands via vault.Tasks.{edit,delete,get_by_id}
-        // edit: struct {
-        //     id: []const u8,
-        //     title: []const u8,
-        //     desc: ?[]const u8 = null,
-        // },
-        // delete: struct {
-        //     id: []const u8,
-        // },
-        // show: struct {
-        //     id: []const u8,
-        // },
+        edit: struct {
+            id: []const u8,
+            title: []const u8,
+            desc: ?[]const u8 = null,
+        },
+        delete: struct {
+            id: []const u8,
+        },
     } = null,
 
     pub const help =
@@ -127,8 +177,6 @@ pub const TaskArgs = struct {
         \\      --desc=<description>  New description
         \\  delete
         \\      --id=<id>             Task ID to delete
-        \\  show
-        \\      --id=<id>             Show task details
         \\
         \\Examples:
         \\  tip task --list
@@ -137,485 +185,265 @@ pub const TaskArgs = struct {
     ;
 };
 
-pub fn dispatch_task_command(allocator: std.mem.Allocator, io: std.Io, data_path: []const u8, args: TaskArgs) !void {
-    var v = vault.Vault.open(allocator, io, data_path) catch return error.StorageFailure;
-    defer v.close();
-
-    // var dir = storage.open_data_dir(allocator, io, environ) catch return error.StorageFailure;
-    // defer dir.close(io);
-
-    // if (args.list) return list_task(allocator, io, dir);
+pub fn dispatch(tasks: Tasks, args: TaskArgs) !void {
+    if (args.list) {
+        const items = try tasks.list();
+        return print_task_list(tasks.io, items);
+    }
 
     if (args.subcommand) |subcommand| {
         switch (subcommand) {
-            .add => |a| _ = try v.tasks.add(.{ .title = a.title, .description = a.desc }),
-            // .edit => |e| try edit_task(allocator, io, dir, e.id, e.title, e.desc orelse ""),
-            // .delete => |del| try delete_task(allocator, io, del.id, dir),
-            // .show => |s| try show_task(allocator, io, s.id, dir),
+            .add => |fields| _ = try tasks.add(.{
+                .title = fields.title,
+                .description = fields.desc orelse null,
+            }),
+            .edit => |fields| try tasks.edit(fields.id, .{
+                .title = fields.title,
+                .description = fields.desc orelse null,
+            }),
+            .delete => |fields| try tasks.delete(fields.id),
         }
-    } else {
-        std.debug.print("{s}\n", .{TaskArgs.help});
-    }
-}
-
-// TODO(#6): delete all standalone JSON-backed functions below (add_task through show_task, and their tests).
-// Replace with SQLite dispatch in dispatch_task_command using vault.Tasks.{add,list,get_by_id,edit,delete,complete}.
-pub fn add_task(
-    allocator: std.mem.Allocator,
-    io: std.Io,
-    dir: std.Io.Dir,
-    title: []const u8,
-    description: ?[]const u8,
-) !void {
-    if (title.len == 0) return error.EmptyTitle;
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    const existing = storage.load_tasks(arena.allocator(), io, dir) catch return error.StorageFailure;
-
-    var tasks: std.ArrayList(models.Task) = .empty;
-    defer tasks.deinit(allocator);
-    for (existing) |t| {
-        tasks.append(allocator, t) catch continue;
+        return;
     }
 
-    const id = try generate.generate_id(allocator, io);
-    defer allocator.free(id);
-    try tasks.append(allocator, .{
-        .status = .pending,
-        .id = id[0..],
-        .title = title,
-        .description = description orelse "",
-        .created_at = now_seconds(io),
-    });
-
-    storage.save_tasks(arena.allocator(), io, dir, tasks.items) catch return error.StorageFailure;
+    std.debug.print("{s}\n", .{TaskArgs.help});
 }
 
-pub fn list_task(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    const tasks = storage.load_tasks(arena.allocator(), io, dir) catch return error.StorageFailure;
-
+fn print_task_list(io: std.Io, tasks: []const models.Task) !void {
     if (tasks.len == 0) {
         std.debug.print("No tasks\n", .{});
         return;
     }
 
-    var pending: std.ArrayList(models.Task) = .empty;
-    var in_progress: std.ArrayList(models.Task) = .empty;
-    var completed: std.ArrayList(models.Task) = .empty;
-    defer {
-        pending.deinit(allocator);
-        in_progress.deinit(allocator);
-        completed.deinit(allocator);
-    }
+    const Group = struct {
+        status: models.Task.Status,
+        label: []const u8,
+        color: ansi.Ansi,
+    };
+    const groups = [_]Group{
+        .{ .status = .pending, .label = "Pending", .color = .cyan },
+        .{ .status = .in_progress, .label = "In Progress", .color = .cyan },
+        .{ .status = .completed, .label = "Completed", .color = .green },
+    };
 
-    for (tasks) |task| {
-        switch (task.status) {
-            .pending => try pending.append(allocator, task),
-            .in_progress => try in_progress.append(allocator, task),
-            .completed => try completed.append(allocator, task),
+    for (groups) |group| {
+        var count: usize = 0;
+        for (tasks) |item| {
+            if (item.status == group.status) count += 1;
         }
-    }
+        if (count == 0) continue;
 
-    if (pending.items.len > 0) {
-        std.debug.print("{s}Pending{s} ({d})\n", .{ ansi.ansi_code(.cyan), ansi.ansi_code(.reset), pending.items.len });
-        for (pending.items) |task| {
-            try print_task(io, task, false);
+        std.debug.print("{s}{s}{s} ({d})\n", .{
+            ansi.ansi_code(group.color),
+            group.label,
+            ansi.ansi_code(.reset),
+            count,
+        });
+
+        for (tasks) |item| {
+            if (item.status == group.status) {
+                try print_task_summary(io, item);
+            }
         }
         std.debug.print("\n", .{});
-    }
-
-    if (in_progress.items.len > 0) {
-        std.debug.print("{s}In Progress{s} ({d})\n", .{ ansi.ansi_code(.cyan), ansi.ansi_code(.reset), in_progress.items.len });
-        for (in_progress.items) |task| {
-            try print_task(io, task, false);
-        }
-        std.debug.print("\n", .{});
-    }
-
-    if (completed.items.len > 0) {
-        std.debug.print("{s}Completed{s} ({d})\n", .{ ansi.ansi_code(.green), ansi.ansi_code(.reset), completed.items.len });
-        for (completed.items) |task| {
-            try print_task(io, task, false);
-        }
     }
 }
 
-fn print_task(io: std.Io, task: models.Task, detailed: bool) !void {
+fn print_task_summary(io: std.Io, task: models.Task) !void {
     const c_status = ansi.status_color(task.status);
     const c_reset = ansi.ansi_code(.reset);
     const compact_id = if (task.id.len > 8) task.id[0..8] else task.id;
     const now = now_seconds(io);
 
-    if (detailed) {
-        std.debug.print("{s}=== Task Details ==={s}\n\n", .{ ansi.ansi_code(.cyan), c_reset });
-        std.debug.print("ID:          {s}\n", .{task.id});
-        std.debug.print("Title:       {s}\n", .{task.title});
-
-        if (task.description) |desc| {
-            std.debug.print("Description: {s}\n", .{desc});
-        } else {
-            std.debug.print("Description: -\n", .{});
-        }
-
-        std.debug.print("Status:      {s}{s}{s}\n", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
-
-        if (task.priority) |p| {
-            std.debug.print("Priority:    {s}{s}{s}\n", .{ ansi.ansi_code(ansi.priority_color(task.priority)), ansi.priority_glyph(p), c_reset });
-        } else {
-            std.debug.print("Priority:    -\n", .{});
-        }
-
-        if (task.due_date) |due| {
-            if (due < now) {
-                std.debug.print("Due Date:    {d} (overdue)\n", .{due});
-            } else {
-                std.debug.print("Due Date:    {d}\n", .{due});
-            }
-        } else {
-            std.debug.print("Due Date:    -\n", .{});
-        }
-
-        if (task.assigned_to) |assigned| {
-            std.debug.print("Assigned To: {s}\n", .{assigned});
-        } else {
-            std.debug.print("Assigned To: -\n", .{});
-        }
-
-        std.debug.print("\n", .{});
-        std.debug.print("Created:     {d}\n", .{task.created_at});
-
-        if (task.updated_at) |updated| {
-            std.debug.print("Updated:     {d}\n", .{updated});
-        } else {
-            std.debug.print("Updated:     -\n", .{});
-        }
-
-        if (task.completed_at) |completed| {
-            std.debug.print("Completed:   {d}\n", .{completed});
-        } else {
-            std.debug.print("Completed:   -\n", .{});
-        }
-    } else {
-        std.debug.print("  {s}{s}{s} ", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
-        if (task.priority) |p| {
-            std.debug.print("{s} ", .{ansi.priority_glyph(p)});
-        }
-        std.debug.print("{s}\n", .{task.title});
-
-        if (task.description) |desc| {
-            std.debug.print("      {s}desc:{s} {s}\n", .{ ansi.ansi_code(.yellow), c_reset, desc });
-        }
-
-        if (task.due_date) |due| {
-            if (due < now) {
-                std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi.ansi_code(.red), due, c_reset });
-            } else {
-                std.debug.print("      {s}Due: {d}{s}\n", .{ ansi.ansi_code(.yellow), due, c_reset });
-            }
-        }
-
-        if (task.status == .completed) {
-            if (task.completed_at) |completed| {
-                std.debug.print("      {s}Completed: {d}{s}\n", .{ ansi.ansi_code(.green), completed, c_reset });
-            }
-        }
-
-        std.debug.print("      {s}ID: {s}{s}\n", .{ ansi.ansi_code(.yellow), compact_id, c_reset });
+    std.debug.print("  {s}{s}{s} ", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
+    if (task.priority) |p| {
+        std.debug.print("{s} ", .{ansi.priority_glyph(p)});
     }
+    std.debug.print("{s}\n", .{task.title});
+
+    if (task.description) |desc| {
+        std.debug.print("      {s}desc:{s} {s}\n", .{ ansi.ansi_code(.yellow), c_reset, desc });
+    }
+
+    if (task.due_date) |due| {
+        if (due < now) {
+            std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi.ansi_code(.red), due, c_reset });
+        } else {
+            std.debug.print("      {s}Due: {d}{s}\n", .{ ansi.ansi_code(.yellow), due, c_reset });
+        }
+    }
+
+    if (task.status == .completed) {
+        if (task.completed_at) |completed_at| {
+            std.debug.print("      {s}Completed: {d}{s}\n", .{ ansi.ansi_code(.green), completed_at, c_reset });
+        }
+    }
+
+    std.debug.print("      {s}ID: {s}{s}\n", .{ ansi.ansi_code(.yellow), compact_id, c_reset });
 }
 
-pub fn mark_complete(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
+// ============== Tests ==============
+
+test "add new task" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-
-    const tasks = storage.load_tasks(arena.allocator(), io, dir) catch return error.StorageFailure;
-
-    for (tasks) |*task| {
-        if (std.mem.eql(u8, task.id, task_id)) {
-            task.status = .completed;
-            task.updated_at = now_seconds(io);
-            task.completed_at = now_seconds(io);
-            storage.save_tasks(arena.allocator(), io, dir, tasks) catch return error.StorageFailure;
-            return;
-        }
-    }
-
-    return error.TaskNotFound;
-}
-
-pub fn edit_task(
-    allocator: std.mem.Allocator,
-    io: std.Io,
-    dir: std.Io.Dir,
-    task_id: []const u8,
-    title: []const u8,
-    desc: []const u8,
-) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    const existing = storage.load_tasks(arena.allocator(), io, dir) catch return error.StorageFailure;
-
-    for (0..existing.len) |i| {
-        const id = existing[i].id;
-        const match = if (task_id.len >= 4 and id.len >= task_id.len)
-            std.mem.eql(u8, id[0..task_id.len], task_id)
-        else
-            std.mem.eql(u8, id, task_id);
-
-        if (match) {
-            existing[i].title = title;
-            existing[i].description = desc;
-            existing[i].updated_at = now_seconds(io);
-            storage.save_tasks(arena.allocator(), io, dir, existing) catch return error.StorageFailure;
-            return;
-        }
-    }
-
-    return error.TaskNotFound;
-}
-
-pub fn delete_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    const arena_alloc = arena.allocator();
-
-    const tasks = storage.load_tasks(arena_alloc, io, dir) catch return error.StorageFailure;
-
-    var remaining: std.ArrayList(models.Task) = .empty;
-    defer remaining.deinit(arena_alloc);
-
-    var found_indices: std.ArrayList(usize) = .empty;
-    defer found_indices.deinit(arena_alloc);
-
-    for (tasks, 0..) |task, i| {
-        const match = if (task_id.len >= 4 and task.id.len >= task_id.len)
-            std.mem.eql(u8, task.id[0..task_id.len], task_id)
-        else
-            std.mem.eql(u8, task.id, task_id);
-
-        if (match) {
-            try found_indices.append(arena_alloc, i);
-        } else {
-            try remaining.append(arena_alloc, task);
-        }
-    }
-
-    if (found_indices.items.len == 0) return error.TaskNotFound;
-
-    if (found_indices.items.len > 1) return error.AmbiguousPrefix;
-
-    storage.save_tasks(arena_alloc, io, dir, remaining.items) catch return error.StorageFailure;
-    std.debug.print("Task deleted: {s}\n", .{tasks[found_indices.items[0]].title});
-}
-
-/// Displays full details of a task by ID. Supports partial ID matching (min 4 chars).
-fn show_task(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8, dir: std.Io.Dir) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    const arena_alloc = arena.allocator();
-
-    const tasks = storage.load_tasks(arena_alloc, io, dir) catch return error.StorageFailure;
-
-    var found_indices: std.ArrayList(usize) = .empty;
-    defer found_indices.deinit(arena_alloc);
-
-    for (tasks, 0..) |task, i| {
-        const match = if (task_id.len >= 4 and task.id.len >= task_id.len)
-            std.mem.eql(u8, task.id[0..task_id.len], task_id)
-        else
-            std.mem.eql(u8, task.id, task_id);
-
-        if (match) {
-            try found_indices.append(arena_alloc, i);
-        }
-    }
-
-    if (found_indices.items.len == 0) return error.TaskNotFound;
-
-    if (found_indices.items.len > 1) return error.AmbiguousPrefix;
-
-    const task = tasks[found_indices.items[0]];
-    try print_task(io, task, true);
-}
-
-test "add and list tasks" {
-    const allocator = std.testing.allocator;
+    const allocator = arena.allocator();
     const io = std.testing.io;
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
 
-    try add_task(allocator, io, tmp_dir.dir, "Test Task", null);
+    try migrate.run_migrations(conn);
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
+    const tasks: Tasks = .{ .io = io, .allocator = allocator, .conn = conn };
 
-    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-    try std.testing.expectEqual(tasks.len, 1);
-    try std.testing.expectEqualStrings(tasks[0].title, "Test Task");
-    try std.testing.expectEqual(tasks[0].status, .pending);
-    try std.testing.expect(tasks[0].id.len > 0);
-    try std.testing.expect(tasks[0].created_at > 0);
+    const task = try tasks.add(.{ .title = "first task" });
+
+    try std.testing.expectEqualStrings(task.title, "first task");
+    try std.testing.expectEqual(task.status, .pending);
+    try std.testing.expect(task.id.len > 0);
+    try std.testing.expect(task.created_at > 0);
 }
 
 test "update tasks" {
-    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const io = std.testing.io;
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
 
-    try add_task(allocator, io, tmp_dir.dir, "Test Task", null);
+    try migrate.run_migrations(conn);
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
+    const tasks: Tasks = .{ .io = io, .allocator = allocator, .conn = conn };
 
-    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-    try std.testing.expectEqual(tasks.len, 1);
-    try std.testing.expectEqualStrings(tasks[0].title, "Test Task");
+    const task = try tasks.add(.{ .title = "first task" });
+    try std.testing.expectEqualStrings(task.title, "first task");
 
-    // edit task
-    try edit_task(allocator, io, tmp_dir.dir, tasks[0].id, "something new", "blank desc");
-    // load all new tasks.
-    const tasks2 = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-    try std.testing.expectEqualStrings(tasks2[0].description.?, "blank desc");
+    try tasks.edit(task.id, .{ .title = "something new" });
+    const tasks2 = try tasks.list();
+    try std.testing.expectEqualStrings(tasks2[0].title, "something new");
 }
 
 test "delete task" {
-    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const io = std.testing.io;
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
 
-    try add_task(allocator, io, tmp_dir.dir, "Test Task", null);
+    try migrate.run_migrations(conn);
 
-    const task_id = blk: {
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-        const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-        try std.testing.expectEqual(tasks.len, 1);
-        break :blk try allocator.dupe(u8, tasks[0].id);
-    };
-    defer allocator.free(task_id);
+    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
 
-    try delete_task(allocator, io, task_id, tmp_dir.dir);
+    const task1 = try tasks.add(.{ .title = "first" });
+    const task2 = try tasks.add(.{ .title = "second" });
 
-    {
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-        const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-        try std.testing.expectEqual(tasks.len, 0);
-    }
+    var total_tasks = try tasks.list();
+    try std.testing.expectEqual(total_tasks.len, 2);
+
+    try tasks.delete(task1.id);
+
+    total_tasks = try tasks.list();
+    try std.testing.expectEqual(total_tasks.len, 1);
+    try std.testing.expectEqualStrings(total_tasks[0].id, task2.id);
 }
 
 test "delete nonexistent task returns error" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-
-    try std.testing.expectError(error.TaskNotFound, delete_task(allocator, io, "999", tmp_dir.dir));
-}
-
-test "list task with no file" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-
-    // Should not error — just prints "No tasks"
-    try list_task(allocator, io, tmp_dir.dir);
-}
-
-test "mark_complete sets status and timestamps" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-    var arena = std.heap.ArenaAllocator.init(allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-
-    try add_task(allocator, io, tmp_dir.dir, "Complete Me", null);
-
-    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-    try mark_complete(allocator, io, tasks[0].id, tmp_dir.dir);
-
-    const updated = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-    try std.testing.expectEqual(updated[0].status, .completed);
-    try std.testing.expect(updated[0].updated_at != null);
-    try std.testing.expect(updated[0].completed_at != null);
-}
-
-test "mark_complete nonexistent task returns error" {
-    const allocator = std.testing.allocator;
+    const allocator = arena.allocator();
     const io = std.testing.io;
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
 
-    try add_task(allocator, io, tmp_dir.dir, "Some Task", null);
+    try migrate.run_migrations(conn);
 
-    try std.testing.expectError(error.TaskNotFound, mark_complete(allocator, io, "nonexistent-id", tmp_dir.dir));
+    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
+
+    try std.testing.expectError(error.TaskNotFound, tasks.delete("000"));
 }
 
-test "add empty task name returns error" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-
-    try std.testing.expectError(error.EmptyTitle, add_task(allocator, io, tmp_dir.dir, "", null));
-}
-
-test "multiple tasks have unique ids" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-    var arena = std.heap.ArenaAllocator.init(allocator);
+test "list tasks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
+    const allocator = arena.allocator();
+    const io = std.testing.io;
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
 
-    try add_task(allocator, io, tmp_dir.dir, "First", null);
-    try add_task(allocator, io, tmp_dir.dir, "Second", null);
-    try add_task(allocator, io, tmp_dir.dir, "Third", null);
+    try migrate.run_migrations(conn);
 
-    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-    try std.testing.expectEqual(tasks.len, 3);
-    try std.testing.expect(!std.mem.eql(u8, tasks[0].id, tasks[1].id));
-    try std.testing.expect(!std.mem.eql(u8, tasks[1].id, tasks[2].id));
-    try std.testing.expect(!std.mem.eql(u8, tasks[0].id, tasks[2].id));
+    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
+
+    var total_tasks = try tasks.list();
+    try std.testing.expectEqual(total_tasks.len, 0);
+
+    _ = try tasks.add(.{ .title = "adding" });
+
+    total_tasks = try tasks.list();
+    try std.testing.expectEqual(total_tasks.len, 1);
 }
 
-test "list tasks with mixed statuses" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-    var arena = std.heap.ArenaAllocator.init(allocator);
+test "mark complete and timestamps" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
+    const allocator = arena.allocator();
+    const io = std.testing.io;
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
 
-    try add_task(allocator, io, tmp_dir.dir, "Pending Task", null);
-    try add_task(allocator, io, tmp_dir.dir, "Done Task", null);
+    try migrate.run_migrations(conn);
 
-    const tasks = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-    try mark_complete(allocator, io, tasks[1].id, tmp_dir.dir);
+    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
 
-    const updated = try storage.load_tasks(arena.allocator(), io, tmp_dir.dir);
-    try std.testing.expectEqual(updated[0].status, .pending);
-    try std.testing.expectEqual(updated[1].status, .completed);
+    const task1 = try tasks.add(.{ .title = "complete me" });
+    try std.testing.expectEqual(task1.status, .pending);
+
+    try tasks.edit(task1.id, .{ .status = .completed });
+
+    const all_tasks = try tasks.list();
+    try std.testing.expectEqual(all_tasks.len, 1);
+
+    try std.testing.expectEqual(all_tasks[0].status, .completed);
+    try std.testing.expect(all_tasks[0].updated_at.? > task1.updated_at orelse 0);
+}
+
+test "mark complete nonexistent task returns error" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const io = std.testing.io;
+
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
+
+    try migrate.run_migrations(conn);
+
+    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
+
+    try std.testing.expectError(error.TaskNotFound, tasks.edit("000", .{ .status = .completed }));
+}
+
+test "add empty task title returns error" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const io = std.testing.io;
+
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
+
+    try migrate.run_migrations(conn);
+
+    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
+
+    try std.testing.expectError(error.EmptyTitle, tasks.add(.{ .title = "" }));
+    try std.testing.expectError(error.EmptyTitle, tasks.add(.{ .title = "  " }));
 }

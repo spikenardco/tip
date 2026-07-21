@@ -35,12 +35,12 @@ const dir_config: DirConfig = switch (builtin.os.tag) {
 /// Caller owns the returned memory.
 pub fn data_dir_path(allocator: std.mem.Allocator, environ: std.process.Environ) ![]const u8 {
     if (environ.getPosix(dir_config.primary_env)) |p| {
-        return try std.fs.path.join(allocator, &.{ p, dir_config.primary_subpath });
+        return std.fs.path.join(allocator, &.{ p, dir_config.primary_subpath });
     }
 
     if (dir_config.fallback_env) |fallback| {
         const home = environ.getPosix(fallback) orelse return error.HomeDirMissing;
-        return try std.fs.path.join(allocator, &.{ home, dir_config.fallback_subpath });
+        return std.fs.path.join(allocator, &.{ home, dir_config.fallback_subpath });
     }
 
     return error.HomeDirMissing;

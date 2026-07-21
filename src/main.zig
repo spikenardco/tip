@@ -4,6 +4,7 @@ const flags = @import("flags");
 const task = @import("core/task.zig");
 const errors = @import("core/errors.zig");
 const storage = @import("storage/dir.zig");
+const Vault = @import("./core/vault.zig").Vault;
 
 const Args = struct {
     command: union(enum) {
@@ -28,6 +29,11 @@ const Args = struct {
     ;
 };
 
+fn exit_with_error(err: anyerror) noreturn {
+    std.debug.print("error: {s}\n", .{errors.describe(err)});
+    std.process.exit(errors.exit_code(err));
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
@@ -51,9 +57,16 @@ pub fn main(init: std.process.Init) !void {
     const data_path = try storage.data_dir_path(allocator, init.minimal.environ);
 
     switch (parsed.command) {
-        .task => |t| task.dispatch_task_command(allocator, init.io, data_path, t) catch |err| {
-            std.debug.print("error: {s}\n", .{errors.describe(err)});
-            std.process.exit(errors.exit_code(err));
+        .task => |t| {
+            var vault = Vault.open(
+                allocator,
+                init.io,
+                data_path,
+            ) catch exit_with_error(error.StorageFailure);
+            defer vault.close();
+
+            task.dispatch(vault.tasks(), t) catch |err|
+                exit_with_error(err);
         },
     }
 }

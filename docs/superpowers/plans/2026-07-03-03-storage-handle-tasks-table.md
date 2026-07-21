@@ -38,7 +38,7 @@
   - `pub fn status_icon(status: models.Task.Status) []const u8`
   - `pub fn status_color(status: models.Task.Status) Ansi`
 
-- [ ] **Step 1: Create `src/utils/ansi.zig` with tests**
+- [x] **Step 1: Create `src/utils/ansi.zig` with tests**
 
 ```zig
 const std = @import("std");
@@ -119,12 +119,12 @@ test "status_icon maps statuses" {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they pass**
+- [x] **Step 2: Run tests to verify they pass**
 
 Run: `zig build test --summary all`
 Expected: PASS — all three new tests pass.
 
-- [ ] **Step 3: Update `src/core/task.zig` to import from ansi module**
+- [x] **Step 3: Update `src/core/task.zig` to import from ansi module**
 
 In `src/core/task.zig`, replace the entire local Ansi enum + helper functions block:
 
@@ -204,12 +204,12 @@ Then replace every call site in the same file:
 - `priority_color(...)` → `ansi.priority_color(...)`
 - Type `Ansi` → `ansi.Ansi`
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `zig build test --summary all`
 Expected: PASS — all existing task tests still pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/utils/ansi.zig src/core/task.zig
@@ -229,7 +229,7 @@ git commit -m "refactor: extract ansi helpers to src/utils/ansi.zig"
 - Produces: `pub fn open_data_dir(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Environ) !std.Io.Dir`
 - Replaces: `src/storage/json.zig`'s `open_data_dir` (the other json functions remain)
 
-- [ ] **Step 1: Create `src/storage/dir.zig`**
+- [x] **Step 1: Create `src/storage/dir.zig`**
 
 ```zig
 const std = @import("std");
@@ -284,7 +284,7 @@ pub fn open_data_dir(allocator: std.mem.Allocator, io: std.Io, environ: std.proc
 }
 ```
 
-- [ ] **Step 2: Update `src/core/task.zig` import**
+- [x] **Step 2: Update `src/core/task.zig` import**
 
 In `src/core/task.zig`, change:
 
@@ -300,14 +300,14 @@ const storage = @import("../storage/dir.zig");
 
 Note: `dispatch_task_command` uses `storage.open_data_dir(...)`, which now resolves to `dir.zig`. The individual command functions (`add_task`, `list_task`, etc.) won't compile until Task 4 creates the vault — this is fine since Task 5 rewrites the dispatch. After Task 2, `zig build` will fail on missing `load_tasks`/`save_tasks` imports. That's expected.
 
-- [ ] **Step 3: Run tests to verify storage tests pass**
+- [x] **Step 3: Run tests to verify storage tests pass**
 
 Run: `zig build test --summary all`
 Expected: some tests may fail because `task.zig` still references `storage.load_tasks`/`save_tasks` from the old json module. This is expected — the test suite is in a broken state until Task 5.
 
 Despite the build failure, verify that `src/storage/dir.zig` compiled without errors by checking the compiler output (errors should only mention missing `load_tasks`/`save_tasks`).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/storage/dir.zig src/core/task.zig
@@ -325,7 +325,7 @@ git commit -m "feat: add storage/dir.zig with comptime platform config"
 - Consumes: `001_create_tasks.sql` (sub-project 02) must exist with `_schema_version` table.
 - Produces: tasks table and version 2 in `_schema_version`.
 
-- [ ] **Step 1: Create the migration file**
+- [x] **Step 1: Create the migration file**
 
 Create `src/internal/database/migrations/002_create_tasks.sql`:
 
@@ -348,7 +348,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 INSERT OR IGNORE INTO _schema_version (version) VALUES (2);
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add src/internal/database/migrations/002_create_tasks.sql
@@ -376,7 +376,7 @@ git commit -m "feat: add tasks table migration"
   - `pub const Vault.Tasks` — add/list/get_by_id/edit/delete/complete/start
   - `pub const AddFields` / `pub const EditFields` — input structs
 
-- [ ] **Step 1: Create `src/core/vault.zig` with full implementation and tests**
+- [x] **Step 1: Create `src/core/vault.zig` with full implementation and tests**
 
 ```zig
 const std = @import("std");
@@ -568,7 +568,7 @@ pub const Vault = struct {
 };
 ```
 
-- [ ] **Step 2: Run tests to verify the file compiles and all tests pass**
+- [x] **Step 2: Run tests to verify the file compiles and all tests pass**
 
 Run: `zig build test --summary all`
 Expected: PASS — no new test failures. The vault module has no tests yet (they're added in the next step).
@@ -1095,4 +1095,3 @@ Expected: both work without errors, the list shows the added task.
 **Type consistency:** `Vault.open(allocator, io, environ) !Vault` in Task 4 matches the dispatch call in Task 5. `Tasks.get_by_id(allocator, id) !Task` consistent. `Tasks.edit(id, fields)` consistent with `EditFields` struct. Task enum statuses stored as TEXT strings in SQLite, compared as `[]const u8`.
 
 **Dependency order:** Task 1 → 2 → 3 → 4 → 5 → 6. Each task produces a working intermediate state (build may temporarily break between 2 and 4, noted in Task 2).
-

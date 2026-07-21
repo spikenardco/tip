@@ -26,14 +26,29 @@ fn encode_ulid(ts_ms: u64, rand: [10]u8, out: *[26]u8) void {
 }
 
 /// Generates a new ULID as a 26-char Crockford base32 string.
-/// The returned slice is owned by `allocator`; the caller must free it.
-pub fn generate_id(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
+pub fn generate_id(io: std.Io) [26]u8 {
     const ts_ms: u64 = @intCast(std.Io.Timestamp.now(io, .real).toMilliseconds());
 
     var rand: [10]u8 = undefined;
     io.random(&rand);
 
-    const buf = try allocator.alloc(u8, 26);
-    encode_ulid(ts_ms, rand, buf[0..26]);
+    var buf: [26]u8 = undefined;
+    encode_ulid(ts_ms, rand, &buf);
     return buf;
+}
+
+test "generate_id returns a 26 character Crockford ULID" {
+    const id = generate_id(std.testing.io);
+
+    try std.testing.expectEqual(@as(usize, 26), id.len);
+    for (id) |byte| {
+        try std.testing.expect(std.mem.indexOfScalar(u8, alphabet, byte) != null);
+    }
+}
+
+test "generate_id produces distinct values" {
+    const first = generate_id(std.testing.io);
+    const second = generate_id(std.testing.io);
+
+    try std.testing.expect(!std.mem.eql(u8, &first, &second));
 }

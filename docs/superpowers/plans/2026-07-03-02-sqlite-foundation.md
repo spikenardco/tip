@@ -211,7 +211,7 @@ test "open memory returns a working db" {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 ```bash
 zig build test --summary all
@@ -219,7 +219,7 @@ zig build test --summary all
 
 Expected: PASS — both db tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/internal/database/db.zig
@@ -240,7 +240,7 @@ git commit -m "feat: add sqlite database connection module"
 - Produces: `pub fn run_migrations(db: *zqlite.Conn) !void`
 - Data: `001_create_tasks.sql` contains the `_schema_version` table setup (placeholder for sub-project 03).
 
-- [ ] **Step 1: Create the first migration file**
+- [x] **Step 1: Create the first migration file**
 
 Create `src/internal/database/migrations/001_create_tasks.sql`:
 
@@ -251,7 +251,7 @@ INSERT INTO _schema_version (version) VALUES (1);
 
 This is intentionally minimal — it proves the runner works. The Tasks table and real schema land in sub-project 03.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Create `src/internal/database/migrate.zig` with ONLY tests first:
 
@@ -282,7 +282,7 @@ test "migrations are idempotent" {
 }
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 ```bash
 zig build test --summary all
@@ -290,7 +290,7 @@ zig build test --summary all
 
 Expected: compile error — `run_migrations` not defined yet.
 
-- [ ] **Step 4: Write the migration runner**
+- [x] **Step 4: Write the migration runner**
 
 Prepend the implementation above the tests in `src/internal/database/migrate.zig` (keep `const std` and `const zqlite` at top):
 
@@ -318,7 +318,7 @@ pub fn run_migrations(db: *zqlite.Conn) !void {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 ```bash
 zig build test --summary all
@@ -326,7 +326,7 @@ zig build test --summary all
 
 Expected: PASS — both migration tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/internal/database/migrations/001_create_tasks.sql src/internal/database/migrate.zig
