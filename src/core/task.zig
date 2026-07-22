@@ -141,6 +141,12 @@ pub const Tasks = struct {
 
         return error.TaskNotFound;
     }
+
+    pub fn complete(self: Tasks, id: []const u8) !void {
+        try self.conn.exec("UPDATE tasks SET status = 'completed' WHERE id = ?", .{id});
+
+        if (self.conn.changes() == 0) return error.TaskNotFound;
+    }
 };
 
 pub const TaskArgs = struct {
@@ -156,6 +162,9 @@ pub const TaskArgs = struct {
             desc: ?[]const u8 = null,
         },
         delete: struct {
+            id: []const u8,
+        },
+        complete: struct {
             id: []const u8,
         },
     } = null,
@@ -202,6 +211,7 @@ pub fn dispatch(tasks: Tasks, args: TaskArgs) !void {
                 .description = fields.desc orelse null,
             }),
             .delete => |fields| try tasks.delete(fields.id),
+            .complete => |fields| try tasks.complete(fields.id),
         }
         return;
     }
@@ -446,4 +456,24 @@ test "add empty task title returns error" {
 
     try std.testing.expectError(error.EmptyTitle, tasks.add(.{ .title = "" }));
     try std.testing.expectError(error.EmptyTitle, tasks.add(.{ .title = "  " }));
+}
+
+test "complete task" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const io = std.testing.io;
+
+    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
+
+    try migrate.run_migrations(conn);
+
+    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
+
+    const task1 = try tasks.add(.{ .title = "Test Task" });
+    try tasks.complete(task1.id);
+
+    const all_tasks = try tasks.list();
+    try std.testing.expectEqual(all_tasks[0].status, .completed);
 }
