@@ -12,6 +12,19 @@ pub fn build(b: *std.Build) void {
     const zqlite = b.dependency("zqlite", .{
         .target = target,
         .optimize = optimize,
+        .sqlite3 = &[_][]const u8{
+            "-std=c17",
+            "-Oz",
+            "-DSQLITE_OMIT_JSON",
+            "-DSQLITE_OMIT_LOAD_EXTENSION",
+            "-DSQLITE_OMIT_PROGRESS_CALLBACK",
+            "-DSQLITE_OMIT_SHARED_CACHE",
+            "-DSQLITE_THREADSAFE=0",
+            "-DSQLITE_DQS=0",
+            "-DSQLITE_OMIT_DEPRECATED",
+            "-DSQLITE_OMIT_UTF16",
+            "-DSQLITE_OMIT_COMPILEOPTION_DIAGS",
+        },
     }).module("zqlite");
 
     const manifest = std.zon.parse.fromSliceAlloc(
