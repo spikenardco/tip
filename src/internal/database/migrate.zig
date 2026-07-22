@@ -18,7 +18,7 @@ pub fn run_migrations(conn: zqlite.Conn) !void {
     try conn.execNoArgs("BEGIN IMMEDIATE");
     errdefer conn.rollback();
 
-    try conn.execNoArgs("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER NOT NULL)");
+    try conn.execNoArgs("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER NOT NULL UNIQUE)");
     const current_version = try read_schema_version(conn);
 
     if (current_version < 1) try conn.execNoArgs(migration_001);

@@ -1,1 +1,1 @@
-INSERT INTO _schema_version (version) VALUES (1);
+INSERT OR IGNORE INTO _schema_version (version) VALUES (1);
