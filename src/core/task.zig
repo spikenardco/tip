@@ -136,7 +136,7 @@ pub const Tasks = struct {
 
     pub fn get(self: Tasks, id: []const u8) !models.Task {
         if (try self.conn.row("SELECT * FROM tasks WHERE id = ?", .{id})) |row| {
-            return scan_task(row);
+            return self.scan_task(row);
         }
 
         return error.TaskNotFound;
@@ -152,6 +152,79 @@ pub const Tasks = struct {
         try self.conn.exec("UPDATE tasks SET status = 'in_progress' WHERE id = ?", .{id});
 
         if (self.conn.changes() == 0) return error.TaskNotFound;
+    }
+
+    fn print_task_list(self: Tasks, tasks: []const models.Task) !void {
+        if (tasks.len == 0) {
+            std.debug.print("No tasks\n", .{});
+            return;
+        }
+
+        const Group = struct {
+            status: models.Task.Status,
+            label: []const u8,
+            color: ansi.Ansi,
+        };
+        const groups = [_]Group{
+            .{ .status = .pending, .label = "Pending", .color = .cyan },
+            .{ .status = .in_progress, .label = "In Progress", .color = .cyan },
+            .{ .status = .completed, .label = "Completed", .color = .green },
+        };
+
+        for (groups) |group| {
+            var count: usize = 0;
+            for (tasks) |item| {
+                if (item.status == group.status) count += 1;
+            }
+            if (count == 0) continue;
+
+            std.debug.print("{s}{s}{s} ({d})\n", .{
+                ansi.ansi_code(group.color),
+                group.label,
+                ansi.ansi_code(.reset),
+                count,
+            });
+
+            for (tasks) |item| {
+                if (item.status == group.status) {
+                    try self.print_task_summary(item);
+                }
+            }
+            std.debug.print("\n", .{});
+        }
+    }
+
+    fn print_task_summary(self: Tasks, task: models.Task) !void {
+        const c_status = ansi.status_color(task.status);
+        const c_reset = ansi.ansi_code(.reset);
+        const compact_id = if (task.id.len > 8) task.id[0..8] else task.id;
+        const now = now_seconds(self.io);
+
+        std.debug.print("  {s}{s}{s} ", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
+        if (task.priority) |p| {
+            std.debug.print("{s} ", .{ansi.priority_glyph(p)});
+        }
+        std.debug.print("{s}\n", .{task.title});
+
+        if (task.description) |desc| {
+            std.debug.print("      {s}desc:{s} {s}\n", .{ ansi.ansi_code(.yellow), c_reset, desc });
+        }
+
+        if (task.due_date) |due| {
+            if (due < now) {
+                std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi.ansi_code(.red), due, c_reset });
+            } else {
+                std.debug.print("      {s}Due: {d}{s}\n", .{ ansi.ansi_code(.yellow), due, c_reset });
+            }
+        }
+
+        if (task.status == .completed) {
+            if (task.completed_at) |completed_at| {
+                std.debug.print("      {s}Completed: {d}{s}\n", .{ ansi.ansi_code(.green), completed_at, c_reset });
+            }
+        }
+
+        std.debug.print("      {s}ID: {s}{s}\n", .{ ansi.ansi_code(.yellow), compact_id, c_reset });
     }
 };
 
@@ -206,7 +279,7 @@ pub const TaskArgs = struct {
 pub fn dispatch(tasks: Tasks, args: TaskArgs) !void {
     if (args.list) {
         const items = try tasks.list();
-        return print_task_list(tasks.io, items);
+        return tasks.print_task_list(items);
     }
 
     if (args.subcommand) |subcommand| {
@@ -227,79 +300,6 @@ pub fn dispatch(tasks: Tasks, args: TaskArgs) !void {
     }
 
     std.debug.print("{s}\n", .{TaskArgs.help});
-}
-
-fn print_task_list(io: std.Io, tasks: []const models.Task) !void {
-    if (tasks.len == 0) {
-        std.debug.print("No tasks\n", .{});
-        return;
-    }
-
-    const Group = struct {
-        status: models.Task.Status,
-        label: []const u8,
-        color: ansi.Ansi,
-    };
-    const groups = [_]Group{
-        .{ .status = .pending, .label = "Pending", .color = .cyan },
-        .{ .status = .in_progress, .label = "In Progress", .color = .cyan },
-        .{ .status = .completed, .label = "Completed", .color = .green },
-    };
-
-    for (groups) |group| {
-        var count: usize = 0;
-        for (tasks) |item| {
-            if (item.status == group.status) count += 1;
-        }
-        if (count == 0) continue;
-
-        std.debug.print("{s}{s}{s} ({d})\n", .{
-            ansi.ansi_code(group.color),
-            group.label,
-            ansi.ansi_code(.reset),
-            count,
-        });
-
-        for (tasks) |item| {
-            if (item.status == group.status) {
-                try print_task_summary(io, item);
-            }
-        }
-        std.debug.print("\n", .{});
-    }
-}
-
-fn print_task_summary(io: std.Io, task: models.Task) !void {
-    const c_status = ansi.status_color(task.status);
-    const c_reset = ansi.ansi_code(.reset);
-    const compact_id = if (task.id.len > 8) task.id[0..8] else task.id;
-    const now = now_seconds(io);
-
-    std.debug.print("  {s}{s}{s} ", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
-    if (task.priority) |p| {
-        std.debug.print("{s} ", .{ansi.priority_glyph(p)});
-    }
-    std.debug.print("{s}\n", .{task.title});
-
-    if (task.description) |desc| {
-        std.debug.print("      {s}desc:{s} {s}\n", .{ ansi.ansi_code(.yellow), c_reset, desc });
-    }
-
-    if (task.due_date) |due| {
-        if (due < now) {
-            std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi.ansi_code(.red), due, c_reset });
-        } else {
-            std.debug.print("      {s}Due: {d}{s}\n", .{ ansi.ansi_code(.yellow), due, c_reset });
-        }
-    }
-
-    if (task.status == .completed) {
-        if (task.completed_at) |completed_at| {
-            std.debug.print("      {s}Completed: {d}{s}\n", .{ ansi.ansi_code(.green), completed_at, c_reset });
-        }
-    }
-
-    std.debug.print("      {s}ID: {s}{s}\n", .{ ansi.ansi_code(.yellow), compact_id, c_reset });
 }
 
 // ============== Tests ==============
