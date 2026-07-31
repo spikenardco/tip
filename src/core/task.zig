@@ -134,7 +134,7 @@ pub const Tasks = struct {
         if (self.conn.changes() == 0) return error.TaskNotFound;
     }
 
-    pub fn get(self: *Tasks, id: []const u8) !models.Task {
+    pub fn get(self: Tasks, id: []const u8) !models.Task {
         if (try self.conn.row("SELECT * FROM tasks WHERE id = ?", .{id})) |row| {
             return scan_task(row);
         }
