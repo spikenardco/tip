@@ -8,6 +8,7 @@ pub const Vault = struct {
     conn: zqlite.Conn,
     io: std.Io,
     allocator: std.mem.Allocator,
+    tasks: task.Tasks,
 
     pub fn open(allocator: std.mem.Allocator, io: std.Io, data_path: []const u8) !Vault {
         try std.Io.Dir.cwd().createDirPath(io, data_path);
@@ -22,18 +23,15 @@ pub const Vault = struct {
             .conn = conn,
             .io = io,
             .allocator = allocator,
+            .tasks = task.Tasks{
+                .conn = conn,
+                .allocator = allocator,
+                .io = io,
+            },
         };
     }
 
     pub fn close(self: *Vault) void {
         self.conn.close();
-    }
-
-    pub fn tasks(self: *const Vault) task.Tasks {
-        return .{
-            .conn = self.conn,
-            .allocator = self.allocator,
-            .io = self.io,
-        };
     }
 };

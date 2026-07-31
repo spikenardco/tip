@@ -65,7 +65,7 @@ pub fn main(init: std.process.Init) !void {
             ) catch exit_with_error(error.StorageFailure);
             defer vault.close();
 
-            task.dispatch(vault.tasks(), t) catch |err|
+            task.dispatch(vault.tasks, t) catch |err|
                 exit_with_error(err);
         },
     }
