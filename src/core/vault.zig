@@ -6,8 +6,6 @@ const migrations = @import("../internal/database/migrate.zig");
 
 pub const Vault = struct {
     conn: zqlite.Conn,
-    io: std.Io,
-    allocator: std.mem.Allocator,
     tasks: task.Tasks,
 
     pub fn open(allocator: std.mem.Allocator, io: std.Io, data_path: []const u8) !Vault {
@@ -21,8 +19,6 @@ pub const Vault = struct {
 
         return Vault{
             .conn = conn,
-            .io = io,
-            .allocator = allocator,
             .tasks = task.Tasks{
                 .conn = conn,
                 .allocator = allocator,
