@@ -304,20 +304,46 @@ fn print_task_summary(io: std.Io, task: models.Task) !void {
 
 // ============== Tests ==============
 
+const TestTasks = struct {
+    arena: *std.heap.ArenaAllocator,
+    conn: zqlite.Conn,
+    tasks: Tasks,
+
+    fn init() !TestTasks {
+        const arena = try std.testing.allocator.create(std.heap.ArenaAllocator);
+        errdefer std.testing.allocator.destroy(arena);
+        arena.* = std.heap.ArenaAllocator.init(std.testing.allocator);
+        errdefer arena.deinit();
+
+        const allocator = arena.allocator();
+        const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+        errdefer conn.close();
+
+        try migrate.run_migrations(conn);
+
+        return .{
+            .arena = arena,
+            .conn = conn,
+            .tasks = .{
+                .conn = conn,
+                .io = std.testing.io,
+                .allocator = allocator,
+            },
+        };
+    }
+
+    fn deinit(self: *TestTasks) void {
+        self.conn.close();
+        self.arena.deinit();
+        std.testing.allocator.destroy(self.arena);
+    }
+};
+
 test "add new task" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
-
-    try migrate.run_migrations(conn);
-
-    const tasks: Tasks = .{ .io = io, .allocator = allocator, .conn = conn };
-
-    const task = try tasks.add(.{ .title = "first task" });
+    const task = try fixture.tasks.add(.{ .title = "first task" });
 
     try std.testing.expectEqualStrings(task.title, "first task");
     try std.testing.expectEqual(task.status, .pending);
@@ -326,109 +352,64 @@ test "add new task" {
 }
 
 test "update tasks" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
-
-    try migrate.run_migrations(conn);
-
-    const tasks: Tasks = .{ .io = io, .allocator = allocator, .conn = conn };
-
-    const task = try tasks.add(.{ .title = "first task" });
+    const task = try fixture.tasks.add(.{ .title = "first task" });
     try std.testing.expectEqualStrings(task.title, "first task");
 
-    try tasks.edit(task.id, .{ .title = "something new" });
-    const tasks2 = try tasks.list();
+    try fixture.tasks.edit(task.id, .{ .title = "something new" });
+    const tasks2 = try fixture.tasks.list();
     try std.testing.expectEqualStrings(tasks2[0].title, "something new");
 }
 
 test "delete task" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
+    const task1 = try fixture.tasks.add(.{ .title = "first" });
+    const task2 = try fixture.tasks.add(.{ .title = "second" });
 
-    try migrate.run_migrations(conn);
-
-    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
-
-    const task1 = try tasks.add(.{ .title = "first" });
-    const task2 = try tasks.add(.{ .title = "second" });
-
-    var total_tasks = try tasks.list();
+    var total_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(total_tasks.len, 2);
 
-    try tasks.delete(task1.id);
+    try fixture.tasks.delete(task1.id);
 
-    total_tasks = try tasks.list();
+    total_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(total_tasks.len, 1);
     try std.testing.expectEqualStrings(total_tasks[0].id, task2.id);
 }
 
 test "delete nonexistent task returns error" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
-
-    try migrate.run_migrations(conn);
-
-    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
-
-    try std.testing.expectError(error.TaskNotFound, tasks.delete("000"));
+    try std.testing.expectError(error.TaskNotFound, fixture.tasks.delete("000"));
 }
 
 test "list tasks" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
-
-    try migrate.run_migrations(conn);
-
-    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
-
-    var total_tasks = try tasks.list();
+    var total_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(total_tasks.len, 0);
 
-    _ = try tasks.add(.{ .title = "adding" });
+    _ = try fixture.tasks.add(.{ .title = "adding" });
 
-    total_tasks = try tasks.list();
+    total_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(total_tasks.len, 1);
 }
 
 test "mark complete and timestamps" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
-
-    try migrate.run_migrations(conn);
-
-    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
-
-    const task1 = try tasks.add(.{ .title = "complete me" });
+    const task1 = try fixture.tasks.add(.{ .title = "complete me" });
     try std.testing.expectEqual(task1.status, .pending);
 
-    try tasks.edit(task1.id, .{ .status = .completed });
+    try fixture.tasks.edit(task1.id, .{ .status = .completed });
 
-    const all_tasks = try tasks.list();
+    const all_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(all_tasks.len, 1);
 
     try std.testing.expectEqual(all_tasks[0].status, .completed);
@@ -436,74 +417,38 @@ test "mark complete and timestamps" {
 }
 
 test "mark complete nonexistent task returns error" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
-
-    try migrate.run_migrations(conn);
-
-    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
-
-    try std.testing.expectError(error.TaskNotFound, tasks.edit("000", .{ .status = .completed }));
+    try std.testing.expectError(error.TaskNotFound, fixture.tasks.edit("000", .{ .status = .completed }));
 }
 
 test "add empty task title returns error" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
-
-    try migrate.run_migrations(conn);
-
-    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
-
-    try std.testing.expectError(error.EmptyTitle, tasks.add(.{ .title = "" }));
-    try std.testing.expectError(error.EmptyTitle, tasks.add(.{ .title = "  " }));
+    try std.testing.expectError(error.EmptyTitle, fixture.tasks.add(.{ .title = "" }));
+    try std.testing.expectError(error.EmptyTitle, fixture.tasks.add(.{ .title = "  " }));
 }
 
 test "complete task" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
+    const task1 = try fixture.tasks.add(.{ .title = "Test Task" });
+    try fixture.tasks.complete(task1.id);
 
-    try migrate.run_migrations(conn);
-
-    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
-
-    const task1 = try tasks.add(.{ .title = "Test Task" });
-    try tasks.complete(task1.id);
-
-    const all_tasks = try tasks.list();
+    const all_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(all_tasks[0].status, .completed);
 }
 
 test "start task" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const io = std.testing.io;
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
 
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
+    const task1 = try fixture.tasks.add(.{ .title = "Test Task" });
+    try fixture.tasks.start(task1.id);
 
-    try migrate.run_migrations(conn);
-
-    const tasks = Tasks{ .conn = conn, .io = io, .allocator = allocator };
-
-    const task1 = try tasks.add(.{ .title = "Test Task" });
-    try tasks.start(task1.id);
-
-    const all_tasks = try tasks.list();
+    const all_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(all_tasks[0].status, .in_progress);
 }
