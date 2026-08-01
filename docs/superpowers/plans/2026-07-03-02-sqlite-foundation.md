@@ -1,5 +1,7 @@
 # Sub-project 02 — SQLite Foundation Implementation Plan
 
+> **Status:** IMPLEMENTED WITH DEVIATIONS. The plan is historical; see the spec baseline record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire SQLite into the build, add a `db.zig` connection module, and establish the migration runner with embedded `.sql` files.
@@ -7,6 +9,9 @@
 **Architecture:** zqlite dependency fetched and wired in `build.zig` for both the exe and test modules. A new `db.zig` opens/creates `tip.db` in the platform data directory with WAL mode. A `migrate.zig` runner applies numbered `.sql` migrations from `src/internal/database/migrations/`, each in its own transaction.
 
 **Tech Stack:** Zig 0.16 (`std.Io` async model), `zqlite` dependency, `zqlite.open()` API.
+
+> **Baseline note:** `db.open` takes a NUL-terminated path, directory resolution is external,
+> and the runner applies versions 1 and 2 in one `BEGIN IMMEDIATE` transaction.
 
 ## Global Constraints
 
@@ -231,18 +236,18 @@ git commit -m "feat: add sqlite database connection module"
 ### Task 3: Migration runner + first `.sql` migration
 
 **Files:**
-- Create: `src/internal/database/migrations/001_create_tasks.sql`
+- Create: `src/internal/database/migrations/001_create_schema_version.sql`
 - Create: `src/internal/database/migrate.zig`
 - Test: `src/internal/database/migrate.zig` (tests live in same file)
 
 **Interfaces:**
-- Consumes: `*zqlite.Conn` from Task 2, `@embedFile("migrations/001_create_tasks.sql")`.
+- Consumes: `*zqlite.Conn` from Task 2 and the embedded schema-version migration.
 - Produces: `pub fn run_migrations(db: *zqlite.Conn) !void`
-- Data: `001_create_tasks.sql` contains the `_schema_version` table setup (placeholder for sub-project 03).
+- Data: `001_create_schema_version.sql` contains the `_schema_version` table setup.
 
 - [x] **Step 1: Create the first migration file**
 
-Create `src/internal/database/migrations/001_create_tasks.sql`:
+Create `src/internal/database/migrations/001_create_schema_version.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER NOT NULL);
@@ -301,7 +306,7 @@ const zqlite = @import("zqlite");
 /// Ordered list of migration SQL embedded at compile time.
 /// Each migration is a numbered `.sql` file in the migrations directory.
 const migrations = struct {
-    const v1 = @embedFile("migrations/001_create_tasks.sql");
+    const v1 = @embedFile("migrations/001_create_schema_version.sql");
 };
 
 /// Runs pending migrations in order. Each migration runs in its own
@@ -329,7 +334,7 @@ Expected: PASS — both migration tests pass.
 - [x] **Step 6: Commit**
 
 ```bash
-git add src/internal/database/migrations/001_create_tasks.sql src/internal/database/migrate.zig
+git add src/internal/database/migrations/001_create_schema_version.sql src/internal/database/migrate.zig
 git commit -m "feat: add migration runner with embedded sql files"
 ```
 
@@ -341,7 +346,7 @@ git commit -m "feat: add migration runner with embedded sql files"
 - F1 zqlite dependency → Task 1 Step 1.
 - F2 embedded `.sql` files → Task 3 (via `@embedFile`).
 - F3 version counter in `_schema_version` → Task 3 Step 4 (`SELECT COALESCE(MAX(version), 0)`).
-- F4 numbered `NNN_*.sql` files → Task 3 Step 1 (`001_create_tasks.sql`).
+- F4 numbered `NNN_*.sql` files → Task 3 Step 1 (`001_create_schema_version.sql`).
 - F5 each migration its own transaction → Task 3 Step 4 (each version block is a separate `db.exec`).
 - F6 in-memory tests → Task 3 Steps 2/5 (`zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode)`).
 - F7 WAL mode → Task 2 Step 3 (`PRAGMA journal_mode = WAL`).

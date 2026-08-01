@@ -1,6 +1,6 @@
 # Sub-project 03 — Storage Handle API + Tasks Table (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** PARTIALLY IMPLEMENTED. Original design preserved; see the baseline record.
 > **Date:** 2026-07-03
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 02 (SQLite foundation) — design and plan done
@@ -278,6 +278,21 @@ All tests use `zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlag
 
 ---
 
+## Baseline record (2026-08-01)
+
+- The active architecture is `Vault { conn: zqlite.Conn, tasks: Tasks }`. `Vault.open`
+  receives allocator, `std.Io`, and an already resolved data path; `Tasks` stores the same
+  connection plus allocator and I/O. `Vault.close` closes the connection.
+- The Tasks table migration and SQLite CRUD/list operations are present. `add` uses ULIDs,
+  stores status/priority as text, and returns owned model fields.
+- The active API uses `Tasks.get`, not the planned `get_by_id`; lookup is exact ID only. There
+  is no `LIKE` prefix matching or `AmbiguousPrefix` resolution.
+- `complete` and `start` methods exist, but their current SQL uses `AND` inside the `SET`
+  expression. The resulting invalid status values make the related tests fail.
+- The original JSON-removal and CLI-slimming goals are not treated as fully complete in this
+  baseline. The implementation currently differs from the target file layout above.
+
 ## Next step
 
-Write the checkbox implementation plan for this sub-project via the writing-plans skill. **No implementation yet.**
+Writing the checkbox implementation plan for this sub-project via the writing-plans skill is
+complete; remaining work is tracked as a partial implementation.

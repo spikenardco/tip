@@ -1,6 +1,6 @@
 # Sub-project 02 — SQLite Foundation (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** IMPLEMENTED WITH DEVIATIONS. Original design preserved; see the baseline record.
 > **Date:** 2026-07-03
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 01 (ID Strategy + Error Taxonomy) — design and plan done
@@ -18,7 +18,7 @@ This sub-project wires SQLite into the build, adds the `db.zig` connection modul
 | F2 | **Embedded `.sql` files** via `@embedFile`, not read from disk. | LOCKED |
 | F3 | **Simple version-counter** in `_schema_version` table (`INTEGER`). | LOCKED |
 | F4 | **Migrations numbered `NNN_*.sql`** in `src/internal/database/migrations/`. | LOCKED |
-| F5 | **Each migration gets its own transaction.** No cross-migration wrapping. | LOCKED |
+| F5 | **Migration transaction behavior.** The original design used one transaction per migration; the active runner uses one transaction for the migration batch. | IMPLEMENTED WITH DEVIATIONS |
 | F6 | **In-memory SQLite** for tests (`zqlite.open(":memory:", flags)`). | LOCKED |
 | F7 | **WAL mode** enabled on open (`PRAGMA journal_mode=WAL`). | LOCKED |
 
@@ -67,19 +67,19 @@ src/internal/database/
   db.zig
   migrate.zig
   migrations/
-    001_create_tasks.sql
+    001_create_schema_version.sql
 ```
 
 ### Runner behavior
 
 - `run_migrations(db)` checks `SELECT version FROM _schema_version` (returns 0 if table missing).
-- Collects embedded SQL files ordered by filename prefix: `@embedFile("migrations/001_create_tasks.sql")`, etc.
+- Applies the embedded migrations in numeric order. The active set is `001_create_schema_version.sql` and `002_create_tasks.sql`.
 - The 3-digit prefix is the version number.
-- Applies each where `version > current_version`, one per transaction.
+- Applies each where `version > current_version` inside the active migration batch transaction.
 - After each migration, updates `_schema_version.version` to the applied number.
 - Fails hard on error — partial state is contained within one failed migration.
 
-### `001_create_tasks.sql` content
+### `001_create_schema_version.sql` content
 
 Placeholder for this sub-project — enough to prove the runner works:
 
@@ -112,6 +112,18 @@ All tests use `zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlag
 
 ---
 
+## Baseline record (2026-08-01)
+
+- zqlite, WAL mode, embedded SQL, and in-memory migration tests are present.
+- `db.open` accepts a NUL-terminated database path. Platform data-directory resolution is
+  outside this module, not part of its public API.
+- The active migration set is `001_create_schema_version.sql` plus `002_create_tasks.sql`.
+  The runner creates `_schema_version`, then applies pending SQL in one `BEGIN IMMEDIATE`
+  transaction and commits version 2. This differs from the planned one-transaction-per-
+  migration runner.
+- Migration 001 contains only the version insert because table creation is done by the runner.
+
 ## Next step
 
-Write the checkbox implementation plan for this sub-project via the writing-plans skill. **No implementation yet.**
+Writing the checkbox implementation plan for this sub-project via the writing-plans skill is
+complete; this document is now a baseline record.

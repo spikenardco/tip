@@ -1,13 +1,14 @@
 # Tip — Redesign Brainstorm Draft (WORKING DOC)
 
-> **Status:** DRAFT / in-progress brainstorm. Design only — **no implementation yet.**
+> **Status:** DRAFT / baseline record. Original intent is preserved; current status and
+> deviations are recorded in §10a.
 > **Date started:** 2026-06-30
 > **Resume point:** Sub-project **00 (Naming & Conventions Charter)** is **DONE** (charter
 > finalized below, §6); its renames are already applied in code. Sub-project **01 (ID strategy +
-> error taxonomy)** design is **DONE** — see
+> error taxonomy)** is implemented with deviations — see
 > [2026-07-02-01-id-strategy-error-taxonomy-design.md](2026-07-02-01-id-strategy-error-taxonomy-design.md)
-> (decisions E1–E8). Next up: write the 01 checkbox implementation plan, then sub-project
-> **02 (SQLite foundation)**.
+> (decisions E1–E8). SP01–SP04 now have implementation records; see §10a for the current
+> baseline and unresolved work.
 > See [Open Questions](#open-questions--resume-here) at the bottom.
 
 This file captures **everything** discussed so far so nothing is lost: the product vision,
@@ -77,7 +78,7 @@ ROADMAP.md, SERVER_API.md, ZIG_IMPLEMENTATION_GUIDE.md (2532 lines).
 | D7 | **Full identifier table adopted** (see §6). Dropped the separate "type-like consts" row; the Types row covers `Color`/`Task`. | LOCKED |
 | D8 | **Boolean prefixes** (`is_`/`has_`/`can_`/`should_`) apply to internal fields and bool-returning functions. **CLI flags are exempt.** | LOCKED |
 | D9 | **Value constants use lowercase `snake_case`** (matches Zig std, e.g. `ns_per_s`). | LOCKED |
-| D10 | **Flag rules:** `--title` everywhere; `--desc` canonical with `--description` as a hidden alias; `show` for read (not `get`); `add` for adding items, `vault init` stays. | LOCKED |
+| D10 | **Flag rules:** `--title` everywhere; `--desc` canonical with `--description` as a hidden alias; `show` for read (not `get`); `add` for adding items, with `vault add` for vault creation. | LOCKED, superseded by SP06 for vaults |
 
 ### All sub-project 00 questions resolved
 Nothing left open in the naming charter. Remaining open items live in later sub-projects
@@ -271,7 +272,7 @@ FOUNDATION (first; unblocks everything)
 DATA & UX
  05  Config system + global flags (--vault/--config/--verbose...)
  06  Vaults (table, FK, vault cmds, --vault selection, default)
- 07  Export/Import (JSON + CSV, atomic, merge, dry-run)
+  07  Export/Import (JSON, atomic, merge, dry-run)
  08  Task filters/search/stats (FTS, list filters)
   09  Tags & categories
   (Custom fields — dropped from roadmap)
@@ -347,13 +348,40 @@ try vault.tasks.complete(id);
 ## 10. Open questions / RESUME HERE
 
 Sub-project **00 is complete** (charter finalized in §6, D6–D10 locked). The four naming
-questions are all answered.
+questions are all answered. SP01 and SP02 are implemented with deviations; SP03 is partial;
+SP04's complete/start command wiring is present, but exact IDs are intentional and prefix
+ambiguity is not implemented.
 
 **Next actions:**
-- Write the 00 checkbox implementation plan for the renames in §6 (via writing-plans).
-- Then move to sub-project **01 (ID strategy + error taxonomy)** — the first open design
-  question there is picking the ID format (SQLite `rowid` vs ULID vs UUIDv7).
+- Resolve the documented SP03 partial implementation and the complete/start timestamp defect.
+- Decide separately whether prefix matching should be added; it is not part of the current
+  baseline.
 
 ### Process reminder (how we're working)
-Per item: **design → rename-where-needed → redesign → spec → plan → move to next.**
-**No implementation yet.** One brainstorming question at a time.
+Per item: **design → rename-where-needed → redesign → spec → plan → implementation → baseline
+record.** One brainstorming question at a time.
+
+### 10a. Current baseline record (2026-08-01)
+
+- **SP00:** naming renames are applied. The charter remains the source of intent.
+- **SP01:** ULID generation and grouped error descriptions/exit mapping are implemented.
+  `generate_id` returns a value `[26]u8` rather than the planned allocator-owned slice.
+  `main` centralizes task-error rendering, but argument parsing exits directly with code 2.
+  `AmbiguousPrefix` is mapped to exit code 4, not the design text's code 3.
+- **SP02:** zqlite, WAL, embedded migrations, and in-memory tests are implemented. The
+  connection API is `db.open(path)`; directory resolution is handled outside `db.zig`.
+  Migration startup creates `_schema_version`, runs migration 001 and 002 in one
+  `BEGIN IMMEDIATE` transaction, and reaches version 2. This is not one transaction per
+  migration as originally designed.
+- **SP03:** the SQLite Tasks table and `Vault`/`Tasks` architecture are present, but the
+  planned `get_by_id` prefix lookup, JSON migration/removal completion, and planned slim CLI
+  shape are not all present. `Vault` owns a value `zqlite.Conn`; `Tasks` stores the same
+  connection, allocator, and `std.Io`. `Tasks` methods are the active task API.
+- **SP04:** `complete` and `start` variants are wired in `TaskArgs` and dispatch by exact ID.
+  This exact-ID behavior is intentional. There is no prefix matching or ambiguity UX.
+- **Vault/Tasks timestamps:** ULID IDs use the current real timestamp in milliseconds.
+  `add` and `edit` use real Unix seconds for `created_at`/`updated_at`; `complete`/`start`
+  currently use malformed SQLite `UPDATE ... SET status = ... AND updated_at = CURRENT_TIMESTAMP`
+  expressions, causing the two related task tests to fail.
+- **Current verification:** `zig build test --summary all` reports 22 passing and 2 failing
+  tests, both in `complete task` and `start task`.

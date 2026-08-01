@@ -1,6 +1,6 @@
 # Sub-project 01 — ID Strategy + Error Taxonomy (DESIGN)
 
-> **Status:** DESIGN APPROVED. Design only — **no implementation yet.**
+> **Status:** IMPLEMENTED WITH DEVIATIONS. Original design preserved; see the baseline record.
 > **Date:** 2026-07-02
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 00 (Naming & Conventions Charter) — DONE; renames already
@@ -123,7 +123,18 @@ Codes line up with the domain groups so the mapping is mechanical.
 
 ---
 
+## Baseline record (2026-08-01)
+
+- ULID generation is implemented with real millisecond timestamps, 80 random bits, and a
+  returned value `[26]u8`; it is not allocator-owned as the plan proposed.
+- `errors.zig` implements grouped sets, descriptions, and exit mapping. `main.zig` catches
+  task errors centrally, while parser errors exit directly with code 2.
+- Current mappings are `EmptyTitle` and `AmbiguousPrefix` -> 4, `TaskNotFound` -> 3,
+  `StorageFailure` and unknown errors -> 1. The design table's `AmbiguousPrefix` code 3 is not
+  the current fact.
+- Prefix matching is not implemented in the active Tasks API, so `AmbiguousPrefix` is currently
+  a taxonomy member without an active exact-record resolution path.
+
 ## Next step
 Per the working process (design → rename-where-needed → redesign → spec → **plan** → next),
-the next action is to write the checkbox implementation plan for this sub-project via the
-writing-plans skill. **No implementation yet.**
+the implementation plan is historical; this document is now a baseline record.

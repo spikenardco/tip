@@ -1,6 +1,6 @@
 # Sub-project 01 — ID Strategy + Error Taxonomy Implementation Plan
 
-> **Status:** COMPLETE
+> **Status:** IMPLEMENTED WITH DEVIATIONS
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -9,6 +9,10 @@
 **Architecture:** `generate_id` becomes a ULID encoder (48-bit ms timestamp + 80-bit CSPRNG randomness → 26-char Crockford base32). A new `src/core/errors.zig` owns domain-grouped error sets plus `describe`/`exit_code`. Task command functions return typed errors instead of printing; `dispatch_task_command` returns `!void`; `main.zig` catches, renders one line to stderr, and exits with a semantic code.
 
 **Tech Stack:** Zig 0.16 (`std.Io` async model), `flags` dependency, JSON storage (SQLite arrives in sub-projects 02/03).
+
+> **Baseline note:** `generate_id` returns `[26]u8`; parser errors exit directly with code 2;
+> `AmbiguousPrefix` maps to code 4; prefix lookup is not active. See the corresponding spec
+> baseline record.
 
 ## Global Constraints
 

@@ -1,5 +1,8 @@
 # Sub-project 03 — Storage Handle API + Tasks Table Implementation Plan
 
+> **Status:** PARTIALLY IMPLEMENTED. Original checklist and intent are preserved; see the spec
+> baseline record for current architecture and deviations.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the threaded `(allocator, io, dir, ...)` parameter pattern with a `Vault` handle owning shared context, migrate task CRUD from JSON to SQLite, and remove the JSON storage module.
@@ -7,6 +10,10 @@
 **Architecture:** A `Vault` handle wraps a `*zqlite.Conn` connection and exposes a `vault.tasks` child handle. Handle methods return data (no printing); the CLI layer in `task.zig` formats output. Platform directory resolution moves to `src/storage/dir.zig` with a comptime config. Ansi rendering helpers extract to `src/utils/ansi.zig`. Tasks table schema in `002_create_tasks.sql`.
 
 **Tech Stack:** Zig 0.16 (`std.Io` async model), `zqlite` dependency, `zqlite` API.
+
+> **Baseline note:** The active `Vault` owns a value `zqlite.Conn`; `Tasks` stores the connection,
+> allocator, and I/O. The active lookup API is exact `Tasks.get`; prefix matching and the full
+> planned CLI/storage completion are not present.
 
 ## Global Constraints
 
@@ -573,7 +580,7 @@ pub const Vault = struct {
 Run: `zig build test --summary all`
 Expected: PASS — no new test failures. The vault module has no tests yet (they're added in the next step).
 
-- [ ] **Step 3: Add vault tests**
+- [x] **Step 3: Add vault tests**
 
 Append these tests at the bottom of `src/core/vault.zig`:
 

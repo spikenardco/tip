@@ -1,12 +1,19 @@
 # Sub-project 04 — Wire `complete`/`start` CLI + Ambiguity UX Implementation Plan
 
+> **Status:** COMPLETE/START IMPLEMENTED WITH INTENTIONAL DEVIATION. Exact IDs are the current
+> contract; prefix ambiguity UX remains unimplemented.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `tip task complete --id=<prefix>` and `tip task start --id=<prefix>` CLI subcommands, and improve the `AmbiguousPrefix` error to show a match count.
+**Goal:** Add `tip task complete --id=<id>` and `tip task start --id=<id>` CLI subcommands. Prefix matching and ambiguity reporting remain deferred.
 
 **Architecture:** Two additions to `src/core/task.zig` only — `TaskArgs` gets new enum variants, `dispatch_task_command` gets new switch arms. The `AmbiguousPrefix` error is caught at the CLI layer and formatted with a count. No changes to the vault handle or error taxonomy.
 
 **Tech Stack:** Zig 0.16 (`std.Io` async model), `flags` dependency.
+
+> **Baseline note:** The command variants and dispatch arms exist, but dispatch uses exact IDs,
+> does not emit the planned confirmations, and does not implement prefix counting. The known
+> `complete`/`start` SQL timestamp/status defect leaves two tests failing.
 
 **Dependency:** This plan requires **sub-project 03 to be implemented first** — it relies on `Vault.Tasks.complete()` and `Vault.Tasks.start()` from `src/core/vault.zig`.
 
@@ -17,8 +24,8 @@
 - **Error taxonomy (sub-project 01):** `TaskNotFound`, `AmbiguousPrefix`, `StorageFailure`, `EmptyTitle`. Commands return errors; `main.zig` renders via `errors.describe`/`errors.exit_code`.
 - **Exit codes:** `0` ok · `1` internal · `2` usage · `3` not found · `4` validation.
 - **Tests:** `zig build test --summary all` from repo root.
-- **Prefix match lives in `get_by_id`** — no extraction.
-- **AmbiguousPrefix** is caught in the CLI layer, not in the vault handle. Exit code stays 3.
+- **Identifier lookup is exact in the active API.** Prefix matching is deferred.
+- **`AmbiguousPrefix` remains reserved** for a future prefix lookup; it is not raised by current task commands.
 - **Out of scope:** Config system (05), vaults (06), JSON export/import, `list --status` filter.
 
 ---
@@ -82,8 +89,8 @@ git commit -m "feat: add complete/start variants to TaskArgs"
 - Modify: `src/core/task.zig` (dispatch_task_command, tests)
 
 **Interfaces:**
-- Consumes: `Vault.Tasks.complete(id) !void`, `Vault.Tasks.start(id) !void`, `Vault.Tasks.get_by_id(allocator, id) !models.Task`.
-- Produces: `dispatch_task_command` handles `.complete` and `.start` subcommands; `AmbiguousPrefix` error includes match count in the message.
+- Consumes: `Tasks.complete(id) !void`, `Tasks.start(id) !void`, `Tasks.get(allocator, id) !models.Task`.
+- Produces: the task dispatcher handles `.complete` and `.start` subcommands. Prefix ambiguity remains unimplemented.
 
 - [ ] **Step 1: Write failing tests**
 

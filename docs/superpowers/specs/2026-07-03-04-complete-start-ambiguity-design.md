@@ -1,6 +1,6 @@
 # Sub-project 04 — Wire `complete`/`start` CLI + Ambiguity UX (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** IMPLEMENTED WITH DEVIATIONS. Current commands use exact IDs. Prefix matching and ambiguity UX remain planned.
 > **Date:** 2026-07-03
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 03 (Storage handle API + tasks table) — design and plan done
@@ -14,10 +14,10 @@ This sub-project wires the `complete`/`start` handle methods (from sub-project 0
 
 | # | Decision | Status |
 |---|----------|--------|
-| 04-1 | **`complete`/`start` CLI subcommands** use `--id=<prefix>` flag, matching edit/delete/show pattern. | LOCKED |
-| 04-2 | **Ambiguous prefix** returns a plain error with a count in the message. No interactive selection, no rich listing. | LOCKED |
-| 04-3 | **Prefix match lives in `get_by_id`** — no extraction into a shared helper. | LOCKED |
-| 04-4 | **Error message** formatted in the CLI layer (dispatch), not in the error taxonomy. `AmbiguousPrefix` stays as-is. | LOCKED |
+| 04-1 | **`complete`/`start` CLI subcommands** use `--id=<id>`. | IMPLEMENTED |
+| 04-2 | **Prefix matching** may later return a plain error with a count. | DEFERRED |
+| 04-3 | **Exact-ID lookup** uses the active `Tasks.get` API. | IMPLEMENTED |
+| 04-4 | **`AmbiguousPrefix`** remains reserved in the error taxonomy. | DEFERRED |
 
 ---
 
@@ -26,15 +26,15 @@ This sub-project wires the `complete`/`start` handle methods (from sub-project 0
 ### Flag interface
 
 ```
-tip task complete --id=<prefix>
-tip task start    --id=<prefix>
+tip task complete --id=<id>
+tip task start    --id=<id>
 ```
 
-The `--id` value is a prefix; `get_by_id` resolves it (exact match first, then `LIKE 'prefix%'`). This is identical to how edit/delete/show resolve their `--id`.
+The `--id` value is an exact task ID. The active `Tasks.get` method uses `WHERE id = ?`. Prefix matching is not implemented.
 
 ### Dispatch behavior
 
-Call the corresponding `Vault.Tasks` method (`complete`/`start`). On success, print a confirmation:
+Call the corresponding `Tasks` method (`complete`/`start`). On success, the current dispatcher performs the status operation. Confirmation output remains deferred.
 
 ```
 ✓ Completed: Review code
@@ -61,21 +61,21 @@ Append to `TaskArgs.help`:
 
 ### Current state
 
-`Vault.Tasks.get_by_id` returns `error.AmbiguousPrefix` when >1 task matches. The error taxonomy maps this to exit code 3 (not found) with a generic message.
+The active `Tasks.get` method performs exact-ID lookup. It does not return `error.AmbiguousPrefix` for prefixes.
 
 ### New behavior
 
-When `get_by_id` returns `AmbiguousPrefix`, the CLI dispatch catches it and prints:
+If prefix lookup is added later, the intended ambiguity message is:
 
 ```
 Error: 4 tasks match prefix "abc". Be more specific.
 ```
 
-Exit code stays 3 (`NotFound` category). The error is caught at the CLI layer, not in the handle.
+The exit-code policy will be decided when prefix lookup is implemented.
 
-### Where this matters
+### Intended future scope
 
-Every subcommand that takes `--id` benefits: `edit`, `delete`, `show`, `complete`, `start`.
+If prefix lookup is implemented, every subcommand that takes `--id` should benefit: `edit`, `delete`, `show`, `complete`, and `start`.
 
 ---
 
@@ -83,7 +83,7 @@ Every subcommand that takes `--id` benefits: `edit`, `delete`, `show`, `complete
 
 | File | Change |
 |------|--------|
-| `src/core/task.zig` | Add `complete`/`start` to `TaskArgs` union; add dispatch arms; catch `AmbiguousPrefix` in dispatch; update help text |
+| `src/core/task.zig` | Add `complete`/`start` to `TaskArgs` union, add dispatch arms, and update help text. Prefix handling remains deferred. |
 
 No changes to:
 - `src/core/vault.zig` (handle methods already exist from 03)
@@ -101,7 +101,7 @@ No new files.
 |------|------------------|
 | `complete dispatch` | Call `complete` with a full id, verify status changes to `completed` |
 | `start dispatch` | Call `start` with a full id, verify status changes to `in_progress` |
-| `prefix ambiguity message` | Add two tasks with same prefix, call any subcommand with short prefix, verify error message contains count |
+| `prefix ambiguity message` | Future test. Add two tasks with same prefix and verify the message contains the match count. |
 
 These tests live in `src/core/task.zig` (alongside existing dispatch tests) or in `src/core/vault.zig` (alongside existing vault tests). The vault tests already cover `complete`/`start` at the handle level; this adds CLI-level integration tests.
 
@@ -118,6 +118,17 @@ These tests live in `src/core/task.zig` (alongside existing dispatch tests) or i
 
 ---
 
+## Baseline record (2026-08-01)
+
+- `TaskArgs` includes `complete` and `start`, and dispatch calls the corresponding Tasks
+  methods.
+- The active command contract is exact IDs. This is intentional: no prefix ambiguity exists in
+  the current implementation, and no `LIKE` lookup or ambiguity-count UX was added.
+- The design's confirmation output and CLI-level ambiguity handling are not current behavior.
+- The implementation has a known timestamp/status defect in the underlying `complete`/`start`
+  SQL; the two related tests fail in the current baseline.
+
 ## Next step
 
-Write the checkbox implementation plan for this sub-project via the writing-plans skill. No implementation yet.
+Writing the checkbox implementation plan for this sub-project via the writing-plans skill is
+complete; prefix ambiguity remains intentionally unresolved.

@@ -1,6 +1,6 @@
 # Naming Charter Renames Implementation Plan
 
-> **Status:** COMPLETE (Tasks 0–5). Task 6 pending (draft spec checkbox update).
+> **Status:** COMPLETE (Tasks 0–6).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -378,7 +378,7 @@ Record that the renames are applied so the working draft stays accurate.
 **Files:**
 - Modify: `docs/superpowers/specs/2026-06-30-tip-redesign-draft.md` (§6 deliverables checkbox)
 
-- [ ] **Step 1: Check off the last 00 deliverable**
+- [x] **Step 1: Check off the last 00 deliverable**
 
 In §6, change:
 
@@ -405,3 +405,8 @@ git commit -m "docs: mark sub-project 00 rename plan complete"
 
 - `generate.uuid()` rename: decided in sub-project 01 (ID strategy), since the final name depends on whether we pick ULID, UUIDv7, or SQLite rowid.
 - `src/utils/README.md` references a Go-style `GenerateUUID()`; leave it until the ID strategy lands, then rewrite that doc alongside the id rename.
+
+## Baseline record (2026-08-01)
+
+SP00 is complete in source: the naming renames and `--title` flag are applied. The remaining
+Task 6 checkbox is historical documentation work, not an outstanding source change.
