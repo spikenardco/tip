@@ -1,14 +1,12 @@
 const std = @import("std");
 const zqlite = @import("zqlite");
 
-const migration_001 = @embedFile("migrations/001_create_schema_version.sql");
-const migration_002 = @embedFile("migrations/002_create_tasks.sql");
+const migrations = [_][*:0]const u8{
+    @embedFile("migrations/001_create_tasks.sql"),
+};
 
 fn read_schema_version(conn: zqlite.Conn) !i64 {
-    const row = (try conn.row(
-        "SELECT COALESCE(MAX(version), 0) FROM _schema_version",
-        .{},
-    )) orelse return error.StorageFailure;
+    const row = (try conn.row("PRAGMA user_version", .{})) orelse return error.StorageFailure;
     defer row.deinit();
 
     return row.int(0);
@@ -18,11 +16,18 @@ pub fn run_migrations(conn: zqlite.Conn) !void {
     try conn.execNoArgs("BEGIN IMMEDIATE");
     errdefer conn.rollback();
 
-    try conn.execNoArgs("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER NOT NULL UNIQUE)");
     const current_version = try read_schema_version(conn);
+    const latest_version: i64 = @intCast(migrations.len);
 
-    if (current_version < 1) try conn.execNoArgs(migration_001);
-    if (current_version < 2) try conn.execNoArgs(migration_002);
+    if (current_version < 0 or current_version > latest_version)
+        return error.UnsupportedSchemaVersion;
+
+    var version = current_version;
+    while (version < latest_version) : (version += 1) {
+        try conn.execNoArgs(migrations[@intCast(version)]);
+        if (try read_schema_version(conn) != version + 1)
+            return error.InvalidMigrationVersion;
+    }
 
     try conn.commit();
 }
@@ -33,7 +38,7 @@ test "migrations run from scratch" {
 
     try run_migrations(conn);
 
-    try std.testing.expectEqual(@as(i64, 2), try read_schema_version(conn));
+    try std.testing.expectEqual(@as(i64, 1), try read_schema_version(conn));
 }
 
 test "migrations are idempotent" {
@@ -43,7 +48,15 @@ test "migrations are idempotent" {
     try run_migrations(conn);
     try run_migrations(conn);
 
-    try std.testing.expectEqual(@as(i64, 2), try read_schema_version(conn));
+    try std.testing.expectEqual(@as(i64, 1), try read_schema_version(conn));
+
+    if (try conn.row(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_schema_version'",
+        .{},
+    )) |row| {
+        row.deinit();
+        return error.TestExpectedEqual;
+    }
 }
 
 test "migrations create tasks table" {
@@ -62,12 +75,56 @@ test "migrations create tasks table" {
     }
 }
 
-test "failed migration rolls back its version row" {
+test "task schema constraints reject invalid values" {
+    var conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
+
+    try run_migrations(conn);
+
+    try std.testing.expectError(error.ConstraintCheck, conn.exec(
+        "INSERT INTO tasks (id, title, status, created_at) VALUES (?, ?, ?, ?)",
+        .{ "001", "", "pending", @as(i64, 1000) },
+    ));
+    try std.testing.expectError(error.ConstraintCheck, conn.exec(
+        "INSERT INTO tasks (id, title, status, created_at) VALUES (?, ?, ?, ?)",
+        .{ "002", "Valid", "unknown", @as(i64, 1000) },
+    ));
+    try std.testing.expectError(error.ConstraintCheck, conn.exec(
+        "INSERT INTO tasks (id, title, priority, created_at) VALUES (?, ?, ?, ?)",
+        .{ "003", "Valid", "urgent", @as(i64, 1000) },
+    ));
+    try conn.exec(
+        "INSERT INTO tasks (id, title, description, priority, created_at) VALUES (?, ?, ?, ?, ?)",
+        .{ "004", "Valid", null, null, @as(i64, 1000) },
+    );
+}
+
+test "future schema versions are rejected" {
+    var conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
+
+    try conn.execNoArgs("PRAGMA user_version = 2");
+    try std.testing.expectError(error.UnsupportedSchemaVersion, run_migrations(conn));
+    try std.testing.expectEqual(@as(i64, 2), try read_schema_version(conn));
+}
+
+test "failed migration rolls back schema changes" {
     const conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
+    defer conn.close();
+
+    try conn.execNoArgs("CREATE TABLE tasks (id TEXT)");
+
+    try std.testing.expectError(error.Error, run_migrations(conn));
+    try std.testing.expectEqual(@as(i64, 0), try read_schema_version(conn));
+}
+
+test "legacy schema is not repaired" {
+    var conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
     defer conn.close();
 
     try conn.execNoArgs(
         \\CREATE TABLE _schema_version (version INTEGER NOT NULL);
+        \\INSERT INTO _schema_version VALUES (2);
         \\CREATE TABLE tasks (id TEXT);
     );
 
