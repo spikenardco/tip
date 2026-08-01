@@ -22,11 +22,13 @@ pub fn run_migrations(conn: zqlite.Conn) !void {
     if (current_version < 0 or current_version > latest_version)
         return error.UnsupportedSchemaVersion;
 
-    var version = current_version;
-    while (version < latest_version) : (version += 1) {
-        try conn.execNoArgs(migrations[@intCast(version)]);
-        if (try read_schema_version(conn) != version + 1)
+    const first_pending_version: usize = @intCast(current_version);
+    const latest_version_index: usize = @intCast(latest_version);
+    for (first_pending_version..latest_version_index) |version| {
+        try conn.execNoArgs(migrations[version]);
+        if (try read_schema_version(conn) != @as(i64, @intCast(version + 1))) {
             return error.InvalidMigrationVersion;
+        }
     }
 
     try conn.commit();
