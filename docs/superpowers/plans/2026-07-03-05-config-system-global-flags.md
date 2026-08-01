@@ -1,5 +1,7 @@
 # Sub-project 05 — Config System + Global Flags Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a ZON-based config file (`~/.config/tip/tip.zon`), `tip config` commands to manage it, and global flags (`--verbose`, `--quiet`, `--config`, `--vault`, `--mode`).

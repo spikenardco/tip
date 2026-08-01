@@ -1,6 +1,6 @@
 # Sub-project 13 — Password Clipboard Copy (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-08
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 12 (Password strength + audit)

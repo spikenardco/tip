@@ -1,6 +1,6 @@
 # Sub-project 10 — Vault Security (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-05
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 09 (Tags & categories)
@@ -20,7 +20,7 @@ infrastructure for password entries (SP12+).
 | 10-1 | **One master password per vault.** Each vault has its own Argon2id-derived key. | LOCKED |
 | 10-2 | **Only password entries are encrypted.** Tasks stay plaintext. | LOCKED |
 | 10-3 | **Crypto is opt-in via `vault encrypt`.** Existing vaults are not migrated. `vault add` gets a `--encrypt` flag. | LOCKED |
-| 10-4 | **Session key cached on disk** (`~/.tip/sessions/<vault_id>.key`, 0600). No OS keyring. | LOCKED |
+| 10-4 | **Session key cached on disk** under the platform data directory: Linux `$XDG_DATA_HOME/tip/sessions` or `~/.local/share/tip/sessions`, macOS `~/Library/Application Support/tip/sessions`, Windows `%LOCALAPPDATA%\\tip\\sessions` (0600 where supported). No OS keyring. | LOCKED |
 | 10-5 | **Default session TTL: 5 minutes.** Configurable via `config set session_ttl <duration>`. | LOCKED |
 | 10-6 | **Auto-lock on expiry only.** No screen-lock detection, no idle detection. | LOCKED |
 | 10-7 | **AES-256-GCM** from `std.crypto.aead.aes_gcm.Aes256Gcm`. **Argon2id** from `std.crypto.pwhash.argon2`. | LOCKED |
@@ -102,7 +102,7 @@ The key is used for:
 
 ### Session file
 
-Location: `~/.tip/sessions/<vault_id>.key`
+Location: the platform session directory from 10-4, with `<vault_id>.key` as the filename.
 
 Format: JSON with 0600 permissions.
 
@@ -206,7 +206,7 @@ This check only applies to password entries. Task commands do not check it.
 | Vault decrypt command | `vault decrypt` clears salt+hash, deletes session |
 | Vault unlock/lock cycle | `unlock` → `status` shows unlocked → `lock` → `status` shows locked |
 | Vault unlock wrong password | Wrong password returns error, no session written |
-| Vault lock on already-locked | Returns error (not silently a no-op) |
+| Vault lock on already-locked | Succeeds as an idempotent no-op |
 | Double-encrypt rejected | Already-encrypted vault returns error |
 | Vault add --encrypt | New vault created with salt+hash, prompted for password |
 | Vault status on unencrypted vault | Returns "not encrypted" (not locked) |

@@ -1,6 +1,6 @@
 # Sub-project 11 — Password CRUD + Generation (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-05
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 10 (Vault Security)
@@ -260,7 +260,7 @@ ambiguous characters from all enabled sets. At least one character set must rema
 |---|---|
 | `src/core/password.zig` | `Password` handle, CRUD methods, CLI dispatch, tests |
 | `src/core/password_gen.zig` | Password generation logic, tests |
-| `src/storage/migrations/011_create_passwords.sql` | Passwords table migration |
+| `src/internal/database/migrations/011_create_passwords.sql` | Passwords table migration |
 
 ### Modified files
 

@@ -1,10 +1,12 @@
 # Sub-project 08 — Task Filters/Search/Stats Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add filtered listing (`--status`, `--priority`, `--due`, `--assigned`), full-text search (`--search`), and basic statistics (`tip task stats`) to the task manager.
 
-**Architecture:** A new `src/core/query.zig` module defines `TaskQuery`, `DueFilter`, `TaskStats`, and a SQL WHERE clause builder. The `Vault.Tasks` handle (SP03) gets `list(query)` and `stats(query)` methods. The CLI layer in `task.zig` extends `TaskArgs` with filter flags and adds a `stats` subcommand. FTS5 is set up via a migration.
+**Architecture:** A new `src/core/query.zig` module defines `TaskQuery`, `DueFilter`, `TaskStats`, and a SQL WHERE clause builder. The planned `Store.Tasks` handle gets `list(query)` and `stats(query)` methods. Exact task lookup continues through `Tasks.get`; FTS5 is set up via a migration.
 
 **Tech Stack:** Zig 0.16 (`std.Io` async model), `zqlite`, `flags` dependency, SQLite FTS5.
 
@@ -18,7 +20,7 @@
 - **Identifier casing:** functions/vars/fields = `snake_case`; types = `PascalCase`; enum members = `snake_case`.
 - **Error taxonomy (sub-project 01):** `TaskNotFound`, `AmbiguousPrefix`, `StorageFailure`, `EmptyTitle`, `InvalidFilterValue`, `FtsUnavailable`. Commands return errors; `main.zig` renders via `errors.describe`/`errors.exit_code`.
 - **Exit codes:** `0` ok · `1` internal · `2` usage · `3` not found · `4` validation.
-- **Vault handle (SP03):** `Vault.open(allocator, io, .{ .name = name })` → `Vault`, `vault.tasks` → `Tasks` handle with methods `add()`, `list()`, `edit()`, `delete()`, `show()`, `complete()`, `start()`.
+- **Vault handle:** `Vault { conn: zqlite.Conn, tasks: Tasks }`; `vault.tasks` is the task handle and exact or prefix lookup uses `Tasks.get`.
 - **zqlite API:** `zqlite.open(path, flags)` for connections, `conn.exec(sql, params)` for statements, `conn.row(sql, params)` returns `?Row` for single-row, `conn.rows(sql, params)` returns `Rows` for multi-row. Column access: `row.int(0)`, `row.text(1)`, etc.
 - **FTS5:** Requires SQLite built with `SQLITE_ENABLE_FTS5` (standard in most distributions).
 - **Tests:** `zig build test --summary all` from repo root. Tests use in-memory SQLite.
@@ -444,10 +446,10 @@ git commit -m "feat: add TaskQuery, DueFilter, TaskStats, SQL builder, and match
 
 ---
 
-### Task 2: Add `list(query)` and `stats(query)` to the Vault.Tasks handle
+### Task 2: Add `list(query)` and `stats(query)` to the planned Store.Tasks handle
 
 **Files:**
-- Modify: `src/core/vault.zig` (the SP03 Vault handle — add `list` and `stats` methods to `Vault.Tasks`)
+- Modify: `src/core/vault.zig` (the future store handle, adding `list` and `stats` methods to `Store.Tasks`)
 
 **Interfaces:**
 - Consumes: `query.TaskQuery`, `query.WhereClause`, `query.TaskStats`, `query.build_where_clause`, `zqlite.Conn` from vault handle.
@@ -674,7 +676,7 @@ Expected: PASS
 
 ```bash
 git add src/core/query.zig src/core/vault.zig
-git commit -m "feat: add list(query) and stats(query) to Vault.Tasks handle"
+git commit -m "feat: add list(query) and stats(query) to Store.Tasks handle"
 ```
 
 ---
@@ -685,7 +687,7 @@ git commit -m "feat: add list(query) and stats(query) to Vault.Tasks handle"
 - Modify: `src/core/task.zig` (TaskArgs struct, help text, dispatch_task_command, list_task)
 
 **Interfaces:**
-- Consumes: `query.TaskQuery`, `query.DueFilter`, `Vault.Tasks.list(query)`, `flags` CLI parsing.
+- Consumes: `query.TaskQuery`, `query.DueFilter`, `Store.Tasks.list(query)`, `flags` CLI parsing.
 - Produces: extended `TaskArgs` with `status`, `priority`, `due`, `assigned_to`, `search` fields; updated `list_task(query)`.
 
 - [ ] **Step 1: Write failing tests — verify `list` flag composes with filters in dispatch**
@@ -848,7 +850,7 @@ git commit -m "feat: add filter flags to CLI TaskArgs and wire into list_task"
 - Modify: `src/core/task.zig` (add stats subcommand handling, stats output)
 
 **Interfaces:**
-- Consumes: `query.TaskQuery`, `query.TaskStats`, `Vault.Tasks.stats(query)`.
+- Consumes: `query.TaskQuery`, `query.TaskStats`, `Store.Tasks.stats(query)`.
 - Produces: `tip task stats` command output.
 
 - [ ] **Step 1: Wire `stats` in `dispatch_task_command`**
@@ -940,7 +942,7 @@ git commit -m "feat: add tip task stats subcommand"
 ### Task 5: Add FTS5 migration and fallback logic
 
 **Files:**
-- Create: `src/storage/migrations/008_create_tasks_fts.sql`
+- Create: `src/internal/database/migrations/008_create_tasks_fts.sql`
 - Modify: `src/core/query.zig` (FTS5 availability flag in `build_where_clause`)
 - Modify: migration runner (SP02) to include this migration
 
@@ -950,7 +952,7 @@ git commit -m "feat: add tip task stats subcommand"
 
 - [ ] **Step 1: Create the migration SQL**
 
-`src/storage/migrations/008_create_tasks_fts.sql`:
+`src/internal/database/migrations/008_create_tasks_fts.sql`:
 
 ```sql
 -- Migration 008: Create FTS5 index for tasks
@@ -1010,7 +1012,7 @@ test "FTS5 search finds tasks by title" {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/storage/migrations/008_create_tasks_fts.sql
+git add src/internal/database/migrations/008_create_tasks_fts.sql
 git commit -m "feat: add FTS5 migration for tasks full-text search"
 ```
 

@@ -1,14 +1,16 @@
 # Password Strength + Audit Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add password strength scoring (individual) and password audit (scan all stored entries for weak/duplicate/stale passwords).
 
-**Architecture:** A `src/core/password_strength.zig` module provides a pure `score()` function returning a numeric 0-100 score with label and flags. A `src/core/password_audit.zig` module consumes the scorer, loads passwords via SP11's storage layer, decrypts via SP11's field crypto, and produces an `AuditReport`. Both are wired as new subcommands in SP11's `password.zig` dispatch.
+**Architecture:** A `src/core/password_strength.zig` module provides a pure `score()` function returning a numeric 0-100 score with label and flags. A `src/core/password_audit.zig` module consumes the scorer, loads passwords through the active unlocked `Vault.Passwords` handle, decrypts via the session key, and produces an `AuditReport`. Both are wired as new subcommands in SP11's `password.zig` dispatch.
 
 **Tech Stack:** Zig 0.16 (`std.Io`), `std.crypto.random`, no external deps for the scorer.
 
-**Dependency:** This plan requires **sub-project 11 (Password CRUD + Generation)** to be implemented first. The audit module uses SP11's `field.encrypt_field`/`decrypt_field`, `storage.load_passwords`/`save_passwords`, and the `models.Password` struct. The strength scorer is fully standalone and has no dependencies.
+**Dependency:** This plan requires **sub-project 11 (Password CRUD + Generation)** to be implemented first. The audit module uses SP11's field encryption, the active `Vault.Passwords` handle, and the `models.Password` struct. The strength scorer is fully standalone and has no dependencies.
 
 ---
 
@@ -394,10 +396,10 @@ git commit -m "feat: add password strength scoring module"
   - `pub const AuditEntry = struct { id, title, score, label, flags, days_since_update }`
   - `pub const DuplicateGroup = struct { entries: []const AuditEntry, count: usize }`
   - `pub const AuditReport = struct { total, weak, fair, duplicates, stale }`
-  - `pub fn audit(allocator, io, dir, vault_id, key) !AuditReport`
+   - `pub fn audit(allocator, io, vault: *Vault) !AuditReport`
   - `pub fn print_audit_report(io, report: AuditReport) void`
 
-**Dependency note:** This task requires the SP11 modules (`crypto/field.zig`, `storage/json_password.zig`, `core/models.zig` with `Password` struct). The test setup creates encrypted test data using `field.encrypt_field`.
+**Dependency note:** This task requires the SP11 modules (`crypto/field.zig`, `Vault.Passwords`, and `core/models.zig` with `Password` struct). The test setup creates encrypted test data through the vault handle.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -408,7 +410,7 @@ const models = @import("../core/models.zig");
 const field = @import("../crypto/field.zig");
 
 fn test_key() [32]u8 {
-    return [_]u8{0x42} ** 32;
+    return try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
 }
 
 fn write_password_json(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, entries: []const models.Password) !void {
@@ -607,10 +609,9 @@ pub fn audit(
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
-    const storage = @import("../storage/json_password.zig");
-    const all_passwords = try storage.load_passwords(arena_alloc, io, dir);
+    const all_passwords = try vault.passwords.list(arena_alloc);
 
-    // Filter by vault_id
+    // Passwords are already scoped to the active vault by the handle.
     var vault_entries = std.ArrayList(models.Password).empty;
     defer vault_entries.deinit(allocator);
     for (all_passwords) |p| {
@@ -872,10 +873,9 @@ fn handle_audit(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, args:
     const vault_id = args.vault orelse "v1"; // SP06 will wire proper vault resolution
 
     // Get vault key (SP10 session integration)
-    // For now, placeholder key — similar to SP11's add_password
-    var placeholder_key: [32]u8 = [_]u8{0x42} ** 32;
+    const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
 
-    const report = try password_audit.audit(allocator, io, dir, vault_id, &placeholder_key);
+    const report = try password_audit.audit(allocator, io, vault);
     defer {
         allocator.free(report.weak);
         allocator.free(report.fair);
@@ -947,8 +947,8 @@ To:
 At the end of `show_password`, after the `if (!show_pwd)` hint, add:
 ```zig
 if (show_strength) {
-    var placeholder_key: [32]u8 = [_]u8{0x42} ** 32;
-    const decrypted = try field.decrypt_field(entry.password, &placeholder_key, allocator);
+    const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
+    const decrypted = try field.decrypt_field(entry.password, &key, allocator);
     defer allocator.free(decrypted);
     const result = password_strength.score(allocator, decrypted);
     defer allocator.free(result.flags);
@@ -1010,6 +1010,6 @@ git commit -m "feat: add AuditEmptyVault error to taxonomy"
 ### Self-review notes
 
 - The strength scorer (`password_strength.zig`) is fully standalone and can be implemented and tested independently of SP11.
-- The audit module (`password_audit.zig`) depends on SP11's `field.encrypt_field`/`decrypt_field` and `storage.json_password.load_passwords`. These interfaces are well-defined in SP11's spec.
+- The audit module (`password_audit.zig`) depends on SP11's field encryption and `Vault.Passwords`. These interfaces are defined by the SQLite direction in SP11's spec.
 - The CLI wiring (`password.zig`) extends SP11's file. If SP11 hasn't been implemented yet, this task should be deferred until SP11's `PasswordArgs` and dispatch exist.
 - All pattern detection helpers (`find_sequential`, `find_keyboard_pattern`, `find_repeated_chars`) are package-private in `password_strength.zig` and tested implicitly through the `score()` tests.

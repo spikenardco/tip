@@ -1,6 +1,6 @@
 # Sub-project 06 — Vaults (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-03
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 05 (Config system + global flags)
@@ -9,8 +9,7 @@
 This sub-project introduces vaults as a first-class user concept (e.g. `work` / `personal` /
 `finance`). It adds a `vaults` table, a `vault_id` foreign key on `tasks`, a full `tip vault`
 command surface, single-task `task move`, and wires the active-vault selection (`--vault` flag +
-`config.default_vault`) into the storage handle. The 03 `Vault` handle is renamed to `Store`, and
-"a vault" becomes a selected context inside the store.
+`config.default_vault`) into the existing `Vault { conn: zqlite.Conn, tasks: Tasks }` handle.
 
 ---
 
@@ -19,10 +18,10 @@ command surface, single-task `task move`, and wires the active-vault selection (
 | # | Decision | Status |
 |---|----------|--------|
 | 06-1 | **Storage architecture:** one `tip.db`, a `vaults` table, and a `vault_id` FK on `tasks`. Switching vaults changes which `vault_id` is filtered. (Not one-file-per-vault.) | LOCKED |
-| 06-2 | **Handle rename:** 03's `Vault` handle becomes `Store`. `store.tasks` is auto-scoped to the active vault; `store.vaults` does vault-registry CRUD. | LOCKED |
+| 06-2 | **Handle extension:** The existing `Vault` handle gains vault-registry operations. `vault.tasks` is auto-scoped to the active vault; `vault.vaults` does registry CRUD. | LOCKED |
 | 06-3 | **Vault identity:** `vaults.id TEXT PK` (ULID) + `vaults.name TEXT UNIQUE`. `tasks.vault_id` FK → `vaults.id`. Name is a cheap, mutable label. | LOCKED |
 | 06-4 | **Rename + move/merge in scope.** `vault rename` (relabel), `task move` (single task), `vault merge` (bulk) are all part of 06. | LOCKED |
-| 06-5 | **Create verb: `vault add`** (consistent with `task add`). **Supersedes charter D10** which had `vault init`. | LOCKED |
+| 06-5 | **Create verb: `vault add`** (consistent with `task add`). | LOCKED |
 | 06-6 | **`move` placement:** single-task move is `task move <id> --to=<vault>`; bulk is `vault merge <src> --into=<dst>`. No duplicate `vault move`. | LOCKED |
 | 06-7 | **Default vault:** migration seeds a `personal` vault and backfills existing tasks to it. `vault_id` is `NOT NULL` — a task always belongs to exactly one vault. | LOCKED |
 | 06-8 | **Active vault = `config.default_vault`.** No separate state file (for now). `vault switch` = validated `config set default_vault`. `--vault` overrides one command only. Precedence: `--vault` > `config.default_vault` > `"personal"`. | LOCKED |
@@ -125,13 +124,13 @@ added to `db.open` from sub-project 02.
 
 ---
 
-## Part D — `Store` handle API
+## Part D — `Vault` handle API
 
-Renames 03's `Vault` → `Store`. `store.tasks` is auto-scoped to the active vault resolved at
-`open`; `store.vaults` is the unscoped registry handle.
+Extends the existing `Vault { conn: zqlite.Conn, tasks: Tasks }`. `vault.tasks` is auto-scoped to
+the active vault resolved at `open`; `vault.vaults` is the unscoped registry handle.
 
 ```zig
-pub const Store = struct {
+pub const Vault = struct {
     db: *zqlite.Conn,
     io: std.Io,
     active_vault_id: []const u8,   // resolved at open from options/config
@@ -143,15 +142,15 @@ pub const Store = struct {
         default_vault: []const u8 = "personal", // from config.default_vault
     };
 
-    pub fn open(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Environ, opts: OpenOptions) !Store
-    pub fn close(self: *Store) void
+    pub fn open(allocator: std.mem.Allocator, io: std.Io, environ: std.process.Environ, opts: OpenOptions) !Vault
+    pub fn close(self: *Vault) void
 
     pub const Tasks = struct {
-        store: *Store,
-        // all scoped to store.active_vault_id
+        vault: *Vault,
+        // all scoped to vault.active_vault_id
         pub fn add(self: *Tasks, args: AddFields) !models.Task
         pub fn list(self: *Tasks, allocator: std.mem.Allocator) ![]models.Task
-        pub fn get_by_id(self: *Tasks, allocator: std.mem.Allocator, id: []const u8) !models.Task
+        pub fn get(self: *Tasks, allocator: std.mem.Allocator, id: []const u8) !models.Task
         pub fn edit(self: *Tasks, id: []const u8, fields: EditFields) !void
         pub fn delete(self: *Tasks, id: []const u8) !void
         pub fn complete(self: *Tasks, id: []const u8) !void
@@ -160,7 +159,7 @@ pub const Store = struct {
     };
 
     pub const Vaults = struct {
-        store: *Store,
+        vault: *Vault,
         pub fn add(self: *Vaults, name: []const u8) !models.Vault
         pub fn list(self: *Vaults, allocator: std.mem.Allocator) ![]models.Vault
         pub fn get_by_name(self: *Vaults, allocator: std.mem.Allocator, name: []const u8) !models.Vault
@@ -177,7 +176,7 @@ pub const Store = struct {
 - **`open`**: resolves the active vault name (`opts.vault orelse opts.default_vault`), looks up its
   id via `vaults.get_by_name`, stores `active_vault_id`. Unknown name → `VaultNotFound` (fails
   loudly; never silently creates/uses the wrong vault).
-- **Task ops**: every `store.tasks.*` query includes `AND vault_id = active_vault_id`. Tasks in
+- **Task ops**: every `vault.tasks.*` query includes `AND vault_id = active_vault_id`. Tasks in
   other vaults are invisible to the active context.
 - **`tasks.move`**: `UPDATE tasks SET vault_id = ? WHERE id = ? AND vault_id = active_vault_id`.
   The `to_vault_id` is resolved from `--to=<name>` at the CLI layer.
@@ -255,12 +254,12 @@ Prefix-match / ambiguity for `task move <id>` reuse the sub-project 04 helper (`
 
 | File | Change |
 |---|---|
-| `src/core/vault.zig` → `src/core/store.zig` | Rename; `Store` handle, `Tasks` (scoped) + `Vaults` handles |
+| `src/core/vault.zig` | Extend the existing `Vault` handle with scoped `Tasks` and `Vaults` handles |
 | `src/core/models.zig` | Add `Vault` struct (`id`, `name`, `created_at`) |
-| `src/core/task.zig` | `task move` subcommand; task ops go through `store.tasks` |
+| `src/core/task.zig` | `task move` subcommand; task ops go through `vault.tasks` |
 | `src/core/config.zig` | `vault switch` reuses `config set default_vault` |
 | `src/core/errors.zig` | Add vault error members (Part H) |
-| `src/main.zig` | `vault` command variants; `task move`; wire `--vault` into `Store.open` |
+| `src/main.zig` | `vault` command variants; `task move`; wire `--vault` into `Vault.open` |
 | `src/internal/database/db.zig` | `PRAGMA foreign_keys = ON` on open |
 | `src/internal/database/migrations/003_create_vaults.sql` | NEW (vaults table + tasks FK rebuild + backfill) |
 
@@ -300,7 +299,7 @@ Prefix-match / ambiguity for `task move <id>` reuse the sub-project 04 helper (`
 ## Doc housekeeping (apply when spec is accepted)
 
 - **Charter change:** update draft §2 D10 and §6 flag rules — the vault create verb is **`vault add`**,
-  not `vault init` (06-5).
+  use `vault add` (06-5).
 - Record the deferred **`state.zon`** option in the draft's open-questions/notes if useful.
 
 ---

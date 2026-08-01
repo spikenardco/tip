@@ -1,6 +1,6 @@
 # Sub-project 12 — Password Strength + Audit (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-06
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 11 (Password CRUD + Generation)
@@ -115,14 +115,14 @@ pub const AuditEntry = struct {
 };
 
 pub const DuplicateGroup = struct {
-    passwords: []const AuditEntry,
+    entries: []const AuditEntry,
     count: usize,
 };
 ```
 
 ### Audit logic
 
-1. Load all passwords in the active vault (via SP11's storage layer)
+1. Load all passwords from the active vault through `vault.passwords`
 2. For each entry, decrypt and run `password_strength.score()`
 3. Group by decrypted plaintext to find duplicates (encrypted values differ due to random nonces)
 4. Flag entries where `updated_at` is >180 days ago as stale
@@ -133,7 +133,7 @@ pub const DuplicateGroup = struct {
 ### Interface
 
 ```zig
-pub fn audit(allocator: Allocator, io: std.Io, dir: std.Io.Dir, vault_id: []const u8) !AuditReport
+pub fn audit(allocator: Allocator, io: std.Io, vault: *Vault) !AuditReport
 ```
 
 ---

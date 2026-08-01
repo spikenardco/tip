@@ -206,7 +206,7 @@ Booleans get the affirmative prefix **in code only**. CLI flags keep their own U
 | Title field | `--title` everywhere (matches the model field); drop `add --name`. |
 | Description | `--desc` is canonical; `--description` is a hidden alias. |
 | Read verb | `show` (pairs with `list`; `get` is reserved for the future HTTP layer). |
-| Create verb | `add` for adding items to a vault. `vault init` stays, since creating a vault bootstraps a store rather than adding a row. |
+| Create verb | `add` for adding items to a vault. SP06 supersedes the earlier `vault init` wording with `vault add`. |
 
 ### Renames this charter implies (applied in the 00 plan, not now)
 

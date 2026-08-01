@@ -1,6 +1,6 @@
 # Sub-project 14 — Breach Check (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-09
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 13 (Password Clipboard Copy)
@@ -69,9 +69,11 @@ Batch audit:
 
 | Code | Meaning |
 |------|---------|
-| 0 | All safe (no breaches found) |
-| 1 | At least one password breached or common |
-| 2 | No entries to check, or vault locked |
+| 0 | Report completed, including any breach or common-password findings |
+| 1 | Internal or unavailable operation |
+| 2 | Usage error |
+| 3 | Entry or vault not found |
+| 4 | Validation error |
 
 ---
 
@@ -171,7 +173,7 @@ Errors are non-fatal — network failure marks that entry as "offline".
 | Rate limit retry | Mock 429 → retry once |
 | Full audit mixed results | 4 outcomes → correct report |
 | Vault locked | VaultLocked error |
-| No entries | Exit code 2 |
+| No entries | Empty report with the normal success result |
 
 Tests use a small fixture `.bin` (5 entries) and mocked HTTP responses.
 

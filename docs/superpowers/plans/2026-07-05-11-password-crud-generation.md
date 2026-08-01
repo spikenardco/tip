@@ -1,14 +1,16 @@
 # Password CRUD + Generation Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add password entry CRUD (add/list/show/edit/delete), password generation, and field-level encryption using SP10's vault key.
 
-**Architecture:** A `src/core/password.zig` module handles CRUD + CLI dispatch (parallel to `task.zig`), `src/core/password_gen.zig` handles generation, and `src/crypto/mod.zig` (SP10) encrypts the password field with AES-256-GCM using the vault's session key. Storage uses JSON initially, matching the current codebase pattern; migration to SQLite happens when SP03/SP06 are implemented.
+**Architecture:** A `src/core/password.zig` module handles CRUD + CLI dispatch (parallel to `task.zig`), `src/core/password_gen.zig` handles generation, and `src/crypto/mod.zig` (SP10) encrypts the password field with AES-256-GCM using the vault's session key. Storage uses the shared SQLite `tip.db` through the existing `Vault { conn: zqlite.Conn, tasks: Tasks }` direction.
 
 **Tech Stack:** Zig 0.16 (`std.Io` async model), `std.crypto.aead.aes_gcm.Aes256Gcm`, `std.crypto.random`.
 
-**Dependency:** This plan requires **sub-projects 01–10 to be implemented first** — it relies on the crypto module from SP10 (`derive_key`, `encrypt`, `decrypt`), session module from SP10 (`get_key`), error taxonomy from SP01, and the config system from SP05. The Store handle (SP03/SP06) is referenced but not required for the initial JSON-backed implementation.
+**Dependency:** This plan requires **sub-projects 01–10 to be implemented first**. It relies on the crypto module from SP10 (`derive_key`, `encrypt`, `decrypt`), session module from SP10 (`get_key`), the existing `Vault` handle, the SQLite password migration, the error taxonomy from SP01, and the config system from SP05.
 
 ---
 
@@ -327,23 +329,26 @@ git commit -m "feat: add password generation module"
 
 ---
 
-### Task 3: Create password storage helper (json_password.zig)
+### Task 3: Add the password table and `Vault.Passwords` storage handle
 
 **Files:**
-- Create: `src/storage/json_password.zig`
+- Create: `src/internal/database/migrations/011_create_passwords.sql`
+- Modify: `src/core/vault.zig`
 
 **Interfaces:**
 - Consumes: `models.Password`, `std.Io`, `std.Io.Dir`.
 - Produces:
-  - `pub fn load_passwords(arena: Allocator, io: std.Io, dir: std.Io.Dir) ![]models.Password`
-  - `pub fn save_passwords(allocator: Allocator, io: std.Io, dir: std.Io.Dir, passwords: []const models.Password) !void`
+  - `pub fn list(self: *Passwords, allocator: Allocator) ![]models.Password`
+  - `pub fn get(self: *Passwords, allocator: Allocator, id: []const u8) !models.Password`
+  - `pub fn add(self: *Passwords, fields: AddFields) !models.Password`
 
-Mirrors `json.zig`'s `load_tasks`/`save_tasks` pattern.
+Uses the shared SQLite connection and the active vault scope. Exact entry lookup uses the same
+`get` naming as `Tasks.get`.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```zig
-const json_password = @import("storage/json_password.zig");
+const Vault = @import("vault.zig").Vault;
 const models = @import("core/models.zig");
 
 test "save and load passwords round-trip" {
@@ -362,12 +367,14 @@ test "save and load passwords round-trip" {
         .created_at = 100,
     };
 
-    try json_password.save_passwords(allocator, io, tmp_dir.dir, &.{p1});
+    var vault = try Vault.open_memory(allocator, io, .{});
+    defer vault.close();
+    _ = p1;
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const loaded = try json_password.load_passwords(arena.allocator(), io, tmp_dir.dir);
+    const loaded = try vault.passwords.list(arena.allocator());
     try std.testing.expectEqual(@as(usize, 1), loaded.len);
     try std.testing.expectEqualStrings("github", loaded[0].title);
 }
@@ -382,7 +389,7 @@ test "load_passwords with no file returns empty slice" {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const loaded = try json_password.load_passwords(arena.allocator(), io, tmp_dir.dir);
+    const loaded = try vault.passwords.list(arena.allocator());
     try std.testing.expectEqual(@as(usize, 0), loaded.len);
 }
 
@@ -398,12 +405,12 @@ test "save and load multiple passwords" {
         .{ .id = "p2", .vault_id = "v1", .title = "b", .password = "e2", .created_at = 2 },
     };
 
-    try json_password.save_passwords(allocator, io, tmp_dir.dir, &entries);
+    _ = entries;
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const loaded = try json_password.load_passwords(arena.allocator(), io, tmp_dir.dir);
+    const loaded = try vault.passwords.list(arena.allocator());
     try std.testing.expectEqual(@as(usize, 2), loaded.len);
 }
 ```
@@ -411,7 +418,7 @@ test "save and load multiple passwords" {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `zig build test --summary all`
-Expected: FAIL — `json_password.zig` not found
+Expected: FAIL until the SQLite migration and `Vault.Passwords` handle exist.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -450,8 +457,8 @@ Expected: PASS (3 new tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/storage/json_password.zig
-git commit -m "feat: add JSON password storage (load/save)"
+git add src/internal/database/migrations/011_create_passwords.sql src/core/vault.zig
+git commit -m "feat: add SQLite password storage"
 ```
 
 ---
@@ -476,7 +483,7 @@ const field = @import("crypto/field.zig");
 
 test "encrypt_field and decrypt_field round-trip" {
     const allocator = std.testing.allocator;
-    const key: [32]u8 = [_]u8{0x42} ** 32;
+    const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
     const plaintext = "hunter2";
 
     const stored = try field.encrypt_field(plaintext, &key, allocator);
@@ -490,7 +497,7 @@ test "encrypt_field and decrypt_field round-trip" {
 
 test "encrypt_field produces different output each time" {
     const allocator = std.testing.allocator;
-    const key: [32]u8 = [_]u8{0x42} ** 32;
+    const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
     const plaintext = "same text";
 
     const a = try field.encrypt_field(plaintext, &key, allocator);
@@ -504,7 +511,7 @@ test "encrypt_field produces different output each time" {
 
 test "decrypt_field with wrong key returns error" {
     const allocator = std.testing.allocator;
-    const key: [32]u8 = [_]u8{0x42} ** 32;
+    const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
     const wrong_key: [32]u8 = [_]u8{0xFF} ** 32;
     const plaintext = "secret";
 
@@ -516,7 +523,7 @@ test "decrypt_field with wrong key returns error" {
 
 test "encrypt_field empty string" {
     const allocator = std.testing.allocator;
-    const key: [32]u8 = [_]u8{0x42} ** 32;
+    const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
 
     const stored = try field.encrypt_field("", &key, allocator);
     defer allocator.free(stored);
@@ -594,7 +601,7 @@ git commit -m "feat: add field-level encrypt/decrypt with nonce-prepend format"
 - Create: `src/core/password.zig`
 
 **Interfaces:**
-- Consumes: `models.Password`, `json_password`, `field` (crypto), `generate` (id), `password_gen`.
+  - Consumes: `models.Password`, `Vault.Passwords`, `field` (crypto), `generate` (id), `password_gen`.
 - Produces:
   - `pub const PasswordArgs = struct { ... }` — CLI args for all password commands.
   - `pub fn dispatch_password_command(io: std.Io, environ: std.process.Environ, args: PasswordArgs) void`
@@ -605,11 +612,11 @@ git commit -m "feat: add field-level encrypt/decrypt with nonce-prepend format"
 // These tests live in src/core/password.zig and use file-level imports.
 // Import paths below are relative to src/core/.
 const models = @import("models.zig");
-const json_password = @import("../storage/json_password.zig");
+const Vault = @import("vault.zig").Vault;
 const field = @import("../crypto/field.zig");
 
 fn test_key() [32]u8 {
-    return [_]u8{0x42} ** 32;
+    return try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
 }
 
 fn add_test_password(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, title: []const u8) !void {
@@ -620,7 +627,7 @@ fn add_test_password(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const existing = try json_password.load_passwords(arena.allocator(), io, dir);
+    const existing = try vault.passwords.list(arena.allocator());
     var list = std.ArrayList(models.Password).empty;
     defer list.deinit(allocator);
     for (existing) |e| try list.append(allocator, e);
@@ -633,7 +640,7 @@ fn add_test_password(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, 
         .created_at = now_seconds(io),
     });
 
-    try json_password.save_passwords(allocator, io, dir, list.items);
+    try vault.passwords.replace_all(list.items);
 }
 
 fn gen_id(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
@@ -658,7 +665,7 @@ test "password add stores entry" {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const entries = try json_password.load_passwords(arena.allocator(), io, tmp_dir.dir);
+    const entries = try vault.passwords.list(arena.allocator());
     try std.testing.expectEqual(@as(usize, 1), entries.len);
     try std.testing.expectEqualStrings("github", entries[0].title);
 }
@@ -918,12 +925,9 @@ fn add_password(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, args:
 
     // Encrypt the password field
     // In production, the vault key comes from session.get_key.
-    // For tests, a known key is used. The CLI dispatch layer (future)
-    // resolves the vault key before calling this function.
-    // For now we use a placeholder key — the full vault integration
-    // happens when SP10 session management is wired in.
-    var placeholder_key: [32]u8 = [_]u8{0x42} ** 32;
-    const encrypted = try field.encrypt_field(pwd_plain.?, &placeholder_key, allocator);
+     const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
+     defer std.crypto.secureZero(u8, &key);
+     const encrypted = try field.encrypt_field(pwd_plain.?, &key, allocator);
     defer allocator.free(encrypted);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -941,7 +945,7 @@ fn add_password(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, args:
 
     try entries.append(allocator, .{
         .id = id,
-        .vault_id = "v1", // will come from active vault context
+         .vault_id = vault.id,
         .title = args.title,
         .username = args.username,
         .password = encrypted,
@@ -1011,9 +1015,9 @@ fn show_password(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, id: 
     std.debug.print("Username:  {s}\n", .{entry.username orelse "-"});
 
     if (show_pwd) {
-        // Decrypt using placeholder key — in production, use session vault key
-        var placeholder_key: [32]u8 = [_]u8{0x42} ** 32;
-        const decrypted = try field.decrypt_field(entry.password, &placeholder_key, allocator);
+         const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
+         defer std.crypto.secureZero(u8, &key);
+         const decrypted = try field.decrypt_field(entry.password, &key, allocator);
         defer allocator.free(decrypted);
         std.debug.print("Password:  {s}\n", .{decrypted});
     } else {
@@ -1063,8 +1067,8 @@ fn edit_password(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, args
                 if (pwd_plain.len == 0) return error.EmptyPassword;
             }
 
-            var placeholder_key: [32]u8 = [_]u8{0x42} ** 32;
-            const encrypted = try field.encrypt_field(pwd_plain, &placeholder_key, allocator);
+            const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
+            const encrypted = try field.encrypt_field(pwd_plain, &key, allocator);
             if (owned) |o| allocator.free(o);
             entry.password = encrypted;
         }
@@ -1349,7 +1353,7 @@ test "delete nonexistent id returns PasswordNotFound" {
 
 test "encrypt and decrypt with different keys" {
     const allocator = std.testing.allocator;
-    const key1: [32]u8 = [_]u8{0x42} ** 32;
+    const key1 = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
     const key2: [32]u8 = [_]u8{0xAB} ** 32;
 
     const stored = try field.encrypt_field("secret", &key1, allocator);
@@ -1391,7 +1395,7 @@ Expected: All tests PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/core/password.zig src/core/models.zig src/core/password_gen.zig src/crypto/field.zig src/storage/json_password.zig src/main.zig
+git add src/core/password.zig src/core/models.zig src/core/password_gen.zig src/crypto/field.zig src/core/vault.zig src/main.zig
 git commit -m "test: add edge case tests and display polish for password module"
 ```
 
@@ -1426,7 +1430,7 @@ test "full workflow: add → list → show → edit → delete" {
     defer allocator.free(entry_id);
 
     // Show / decrypt
-    const key: [32]u8 = [_]u8{0x42} ** 32;
+    const key = try session.get_key(allocator, io, vault.session_dir, vault.id) orelse return error.VaultLocked;
     const decrypted = try field.decrypt_field(entries[0].password, &key, allocator);
     defer allocator.free(decrypted);
     try std.testing.expectEqualStrings("test_pass", decrypted);

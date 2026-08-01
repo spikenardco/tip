@@ -1,6 +1,6 @@
 # Sub-project 05 — Config System + Global Flags (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-03
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 04 (Wire `complete`/`start` CLI + ambiguity UX)

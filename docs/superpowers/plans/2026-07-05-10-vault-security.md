@@ -1,5 +1,7 @@
 # Vault Security (Crypto + Lock/Unlock) Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add per-vault master passwords with AES-256-GCM encryption, Argon2id key derivation, and a sudo-style session cache with configurable TTL.
@@ -20,7 +22,7 @@
 - **Exit codes:** `0` ok · `1` internal · `2` usage · `3` not found · `4` validation.
 - **Vault handle:** `Vault.open(allocator, io, .{ .name = name })` → `Vault`, `vault.vaults` → `Vaults` handle, `vault.crypto` → `Crypto` handle.
 - **Config (SP05):** `config.get(io, key)` for `session_ttl` (default `300` seconds). `config.set(io, "session_ttl", "600")` for customization.
-- **Session directory:** `~/.tip/sessions/` (0600 perms, created on first unlock if missing).
+- **Session directory:** the platform-specific data directory from the SP10 design (0600 where supported, created on first unlock if missing).
 - **Crypto primitives:** from `std.crypto` — do not vendor or reimplement.
 - **Argon2id defaults:** 19 MiB memory, 2 iterations, 1 thread (OWASP minimum). Configurable via `config set argon2_mem <KiB>`, `config set argon2_iters <count>`.
 - **AES-256-GCM nonce:** 12 random bytes per encryption operation. Nonce stored alongside ciphertext.
@@ -34,7 +36,7 @@
 ### Task 1: Add vault migration for `key_salt` and `key_hash` columns
 
 **Files:**
-- Create: `src/storage/migrations/010_add_vault_crypto_cols.sql`
+- Create: `src/internal/database/migrations/010_add_vault_crypto_cols.sql`
 - Modify: migration runner (SP02) to include this migration
 - Modify: `src/core/models.zig` — add `key_salt` and `key_hash` fields to `Vault` struct
 
@@ -95,7 +97,7 @@ Expected: FAIL — `key_salt`/`key_hash` not on `Vault` struct, migration file m
 
 - [ ] **Step 3: Create the migration SQL**
 
-`src/storage/migrations/010_add_vault_crypto_cols.sql`:
+`src/internal/database/migrations/010_add_vault_crypto_cols.sql`:
 
 ```sql
 -- Migration 010: Add crypto columns to vaults table
@@ -129,7 +131,7 @@ Expected: PASS (3 new tests)
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/storage/migrations/010_add_vault_crypto_cols.sql src/core/models.zig
+git add src/internal/database/migrations/010_add_vault_crypto_cols.sql src/core/models.zig
 git commit -m "feat: add key_salt and key_hash columns for vault encryption"
 ```
 
@@ -139,6 +141,17 @@ git commit -m "feat: add key_salt and key_hash columns for vault encryption"
 
 **Files:**
 - Create: `src/crypto/mod.zig`
+
+Test snippets use a deterministic fixture helper. Production keys must come from
+password derivation or an unlocked session, never from a fixed literal.
+
+```zig
+fn test_key() crypto_mod.Key {
+    var key: crypto_mod.Key = undefined;
+    @memset(&key, 0x5a);
+    return key;
+}
+```
 
 **Interfaces:**
 - Consumes: `std.crypto.aead.aes_gcm.Aes256Gcm`, `std.crypto.pwhash.argon2`.
@@ -183,7 +196,7 @@ test "derive_key different password produces different key" {
 
 test "encrypt/decrypt round-trip" {
     const allocator = std.testing.allocator;
-    const key: crypto_mod.Key = [_]u8{0x42} ** 32;
+    const key = test_key();
     const plaintext = "hello, vault!";
 
     const result = try crypto_mod.encrypt(plaintext, &key, allocator);
@@ -197,7 +210,7 @@ test "encrypt/decrypt round-trip" {
 
 test "encrypt produces different ciphertext each time (random nonce)" {
     const allocator = std.testing.allocator;
-    const key: crypto_mod.Key = [_]u8{0x42} ** 32;
+    const key = test_key();
     const plaintext = "same text";
 
     const r1 = try crypto_mod.encrypt(plaintext, &key, allocator);
@@ -347,7 +360,7 @@ test "session open and get_key round-trip" {
     defer tmp_dir.cleanup();
 
     const vault_id = "vault_abc123";
-    const key: crypto_mod.Key = [_]u8{0x42} ** 32;
+    const key = test_key();
 
     try session.open(allocator, tmp_dir.path, vault_id, &key, 300);
     const result = try session.get_key(allocator, io, tmp_dir.path, vault_id);
@@ -365,7 +378,7 @@ test "session close removes file" {
     defer tmp_dir.cleanup();
 
     const vault_id = "vault_abc123";
-    const key: crypto_mod.Key = [_]u8{0x42} ** 32;
+    const key = test_key();
 
     try session.open(allocator, tmp_dir.path, vault_id, &key, 300);
     try session.close(tmp_dir.path, vault_id);
@@ -382,7 +395,7 @@ test "session expiry returns null" {
     defer tmp_dir.cleanup();
 
     const vault_id = "vault_abc123";
-    const key: crypto_mod.Key = [_]u8{0x42} ** 32;
+    const key = test_key();
 
     // TTL of 0 = immediate expiry
     try session.open(allocator, tmp_dir.path, vault_id, &key, 0);
@@ -399,7 +412,7 @@ test "session close_all removes all session files" {
     const tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const key: crypto_mod.Key = [_]u8{0x42} ** 32;
+    const key = test_key();
 
     try session.open(allocator, tmp_dir.path, "vault_a", &key, 300);
     try session.open(allocator, tmp_dir.path, "vault_b", &key, 300);
@@ -1280,7 +1293,7 @@ test "expired session is treated as locked" {
     // Session is created with default TTL. To test expiry, we manually
     // write a session with expires_at in the past.
     // This verifies the session module's expiry logic.
-    const past_key: crypto_mod.Key = [_]u8{0x42} ** 32;
+            const past_key = test_key();
     try session.open(allocator, vault.session_dir, vault.id, &past_key, -1); // already expired
 
     try std.testing.expect(try vault.crypto.is_locked());

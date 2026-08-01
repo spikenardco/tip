@@ -1,6 +1,6 @@
 # Sub-project 07 — Export/Import (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-04
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 06 (Vaults)
@@ -220,7 +220,7 @@ pub fn import_from_file(store: *Store, allocator: std.mem.Allocator, opts: Impor
 
 ## Out of scope
 
-- CSV export/import (future).
+- CSV export/import is not part of this JSON-only design.
 - Export of future data types (passwords, tags — deferred).
 - Encrypted export (future — ties into crypto sub-project).
 - Import from other tools (1Password, Bitwarden).

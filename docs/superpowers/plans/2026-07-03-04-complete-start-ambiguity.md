@@ -15,7 +15,7 @@
 > does not emit the planned confirmations, and does not implement prefix counting. The known
 > `complete`/`start` SQL timestamp/status defect leaves two tests failing.
 
-**Dependency:** This plan requires **sub-project 03 to be implemented first** — it relies on `Vault.Tasks.complete()` and `Vault.Tasks.start()` from `src/core/vault.zig`.
+**Dependency:** This plan relies on the active `Tasks.complete()` and `Tasks.start()` methods from `src/core/task.zig`.
 
 ## Global Constraints
 
@@ -291,8 +291,8 @@ Expected: builds with no errors.
 - [ ] **Step 3: Quick smoke test**
 
 Run: `zig build run -- task add --title="Smoke test"`
-Run: `zig build run -- task start --id=<prefix>`
-Run: `zig build run -- task complete --id=<prefix>`
+Run: `zig build run -- task start --id=<id>`
+Run: `zig build run -- task complete --id=<id>`
 Run: `zig build run -- task --list`
 Expected: all four commands work, the list shows the task as completed.
 

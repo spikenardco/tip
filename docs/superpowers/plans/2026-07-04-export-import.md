@@ -1,10 +1,12 @@
 # Export/Import Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add JSON export (single vault or all vaults) and import (new vault, restore into existing, merge) commands with atomic file writes and a dry-run preview mode.
 
-**Architecture:** Two new modules — `src/core/export.zig` (builds JSON export files, writes atomically) and `src/core/import.zig` (parses JSON backup files, dispatches to new/restore/merge SQL operations via the Store handle from SP06). File format is a consistent `{version, exported_at, vaults[]}` envelope. Import uses SQLite transactions for atomicity.
+**Architecture:** Two new modules, `src/core/export.zig` and `src/core/import.zig`, dispatching SQL operations through the existing `Vault` handle. File format is a consistent `{version, exported_at, vaults[]}` envelope. Import uses SQLite transactions for atomicity.
 
 **Tech Stack:** Zig 0.16 (`std.Io`, `std.json`, `std.fs`), `zqlite`, `flags` dependency.
 
@@ -21,7 +23,7 @@
 - **Atomic writes:** export uses temp file + atomic rename; import uses SQLite transactions.
 - **Dry-run:** parse file, compare against store, print preview, no writes.
 - **Tests:** `zig build test --summary all` from repo root; storage tests use in-memory zqlite (`zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode)`).
-- **Dependency:** This plan requires sub-projects 01–06 implemented first (Store handle, vaults, config, errors, models, SQLite connection with `PRAGMA foreign_keys = ON`).
+- **Dependency:** This plan requires sub-projects 01–06 implemented first (Vault handle, vaults, config, errors, models, SQLite connection with `PRAGMA foreign_keys = ON`).
 - **Out of scope:** CSV, encrypted export, cross-tool import, password/tag export.
 
 ---
@@ -174,13 +176,13 @@ git commit -m "feat(models): add ExportFile and ExportedVault structs"
 **Interfaces:**
 - Consumes:
   - `models.ExportFile`, `models.ExportedVault`, `models.Task`
-  - `Store` from SP06 (`store.vaults.list`, `store.vaults.get_by_name`, scoped `store.tasks.list`)
+  - `Vault` from SP06 (`vault.vaults.list`, `vault.vaults.get_by_name`, scoped `vault.tasks.list`)
   - `std.json.stringify` for serialization
   - `std.fs.File.Atomic` or equivalent for atomic write (temp + rename)
   - `generate.generate_id`, `now_seconds` from SP01/utils (not needed directly — ids come from Store)
 - Produces:
   - `pub const ExportOptions` struct
-  - `pub fn export_vaults(store: *Store, allocator: std.mem.Allocator, opts: ExportOptions) !void`
+  - `pub fn export_vaults(vault: *Vault, allocator: std.mem.Allocator, opts: ExportOptions) !void`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -442,7 +444,7 @@ git commit -m "feat: add export module for JSON vault export"
 - Produces:
   - `pub const ImportMode = enum { new, restore, merge }`
   - `pub const ImportOptions` struct
-  - `pub fn import_from_file(store: *Store, allocator: std.mem.Allocator, io: std.Io, opts: ImportOptions) !void`
+  - `pub fn import_from_file(vault: *Vault, allocator: std.mem.Allocator, io: std.Io, opts: ImportOptions) !void`
 
 - [ ] **Step 1: Write the failing tests**
 

@@ -1,5 +1,7 @@
 # Sub-project 09 — Tags & Categories Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add tags (many-to-many via join table) and categories (predefined list per vault, single per task) to the task manager.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Zig 0.16 (`std.Io` async model), `zqlite`, `flags` dependency, SQLite.
 
-**Dependency:** This plan requires **sub-projects 01–08 to be implemented first** — it relies on the `Vault` handle from SP03, `Vault.Tasks` from SP03/SP04, vaults from SP06, config from SP05, SQLite migration runner from SP02, error taxonomy from SP01, and `TaskQuery`/`build_where_clause` from SP08.
+**Dependency:** This plan requires **sub-projects 01–08 to be implemented first**. It relies on the planned `Store.Tasks` API, vaults from SP06, config from SP05, the SQLite migration runner from SP02, the error taxonomy from SP01, and `TaskQuery`/`build_where_clause` from SP08.
 
 ---
 
@@ -22,8 +24,8 @@
 - **zqlite API:** `zqlite.open(path, flags)` for connections, `conn.exec(sql, params)` (2 args), `conn.row(sql, params)` returns `?Row`, `conn.rows(sql, params)` returns `Rows`. Column access: `row.int(0)`, `row.text(1)`, etc.
 - **Tests:** `zig build test --summary all` from repo root. Tests use in-memory SQLite.
 - **Tags filter composes as AND with other filters.** Multiple `--tag` flags narrow the result (task must have ALL specified tags).
-- **Categories are flat** (no nesting). Name must be unique per vault.
-- **Tags are global per vault** (shared pool). Name must be unique per vault.
+- **Categories are flat** (no nesting). Each row has `vault_id`; names are unique per vault.
+- **Tags are shared per vault.** Each row has `vault_id`; names are unique per vault.
 - **Out of scope:** Custom fields (dropped from roadmap), bulk tag operations, tag autocomplete, category/tag colours, nested categories.
 
 ---
@@ -648,7 +650,7 @@ if (query.category) |cat| {
     // looks like an ID. In practice the SQL path is preferred.
     // For simplicity, if category is provided, compare directly.
     // Since we don't have the category map here, we skip in-memory check
-    // and defer to the SQL path. In tests using JSON storage, this falls
+    // and defer to the SQL path. Tests use the SQLite store.
     // through and the SQL path handles it.
 }
 
@@ -700,7 +702,7 @@ git commit -m "feat: add category and tag filter support to TaskQuery"
 - Modify: `src/core/task.zig`
 
 **Interfaces:**
-- Consumes: `TaskArgs` (existing), `models.Task`, `models.Category`, `models.Tag`, `Vault.Tasks` with tag/category support.
+- Consumes: `TaskArgs` (existing), `models.Task`, `models.Category`, `models.Tag`, and planned `Store.Tasks` tag/category support.
 - Produces:
   - `category: ?[]const u8` and `tag: ?[]const []const u8` added to `TaskArgs`
   - Updated `add_task` to accept category and tags
@@ -1018,25 +1020,28 @@ git commit -m "feat: register tip category and tip tag top-level commands"
 ### Task 7: Add SQLite migration for categories, tags, and task_tags tables
 
 **Files:**
-- Create: `src/storage/migrations/009_create_categories_tags.sql`
+- Create: `src/internal/database/migrations/009_create_categories_tags.sql`
 - Modify: migration runner (SP02) to include this migration
 
 - [ ] **Step 1: Create the migration SQL**
 
-`src/storage/migrations/009_create_categories_tags.sql`:
+`src/internal/database/migrations/009_create_categories_tags.sql`:
 
 ```sql
 -- Migration 009: Create categories, tags, and task_tags tables
 
 CREATE TABLE IF NOT EXISTS categories (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
+    vault_id TEXT NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    UNIQUE (vault_id, name),
     created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS tags (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE
+    vault_id TEXT NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
 );
 
 CREATE TABLE IF NOT EXISTS task_tags (
@@ -1056,7 +1061,7 @@ Add a second SQL file or append to the same migration:
 
 ```sql
 -- Add category_id to tasks if not present
-ALTER TABLE tasks ADD COLUMN category_id TEXT REFERENCES categories(id);
+ALTER TABLE tasks ADD COLUMN category_id TEXT REFERENCES categories(id) ON DELETE SET NULL;
 ```
 
 Wrap in `ALTER TABLE ... ADD COLUMN` with `IF NOT EXISTS` — SQLite does not support `IF NOT EXISTS` for `ALTER TABLE ADD COLUMN`. Instead, the migration runner should catch the "duplicate column" error and ignore it, or use a separate migration step that checks the table schema first.
@@ -1091,7 +1096,7 @@ test "migration 009 creates tables and supports CRUD" {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/storage/migrations/009_create_categories_tags.sql
+git add src/internal/database/migrations/009_create_categories_tags.sql
 git commit -m "feat: add migration 009 for categories, tags, and task_tags"
 ```
 

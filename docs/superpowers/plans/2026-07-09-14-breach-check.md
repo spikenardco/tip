@@ -1,5 +1,7 @@
 # Breach Check Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add breach checking for passwords using a bundled common-password hash set (offline) plus the HIBP k-anonymity API (online).
@@ -17,7 +19,7 @@
 - **Zig version:** 0.16.0 (`minimum_zig_version = "0.16.0"`). Use the new `std.Io` APIs.
 - **Identifier casing:** functions/vars/fields = `snake_case`; types = `PascalCase`; enum members = `snake_case`.
 - **Error taxonomy (SP01):** `PasswordNotFound`, `VaultLocked`, `EmptyPassword`, `AllCharsetsDisabled`, `AuditEmptyVault`. Add: `BreachCheckFailed`.
-- **Exit codes:** `0` ok · `1` internal · `2` usage · `3` not found · `4` validation · `5` breaches found.
+- **Exit codes:** `0` report completed · `1` internal or unavailable operation · `2` usage · `3` not found · `4` validation. Breach findings are report results, not process errors.
 - **Common password source:** SecLists 10k-most-common.txt (MIT license), committed to repo.
 - **Bundled data:** `src/data/common_passwords.bin` — sorted `[20]u8` SHA-1 digests, committed as generated artifact.
 - **No local cache update.** Refresh requires a binary patch release.
@@ -540,8 +542,8 @@ The existing `handle_audit` should pass `a.breach_check` through.
 ```zig
 fn handle_breach_check_entry(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, args: anytype) !void {
     // Resolve vault and get session key (SP10/SP06 pattern)
-    const vault_id = "v1"; // placeholder — SP06 wires vault resolution
-    var placeholder_key: [32]u8 = [_]u8{0x42} ** 32;
+    const vault_id = vault.active_vault_id;
+    const key = try session.get_key(allocator, io, vault.session_dir, vault_id) orelse return error.VaultLocked;
 
     // Load password entry by name
     const entries = try load_passwords(allocator, io, dir); // SP11 function
@@ -552,7 +554,7 @@ fn handle_breach_check_entry(allocator: std.mem.Allocator, io: std.Io, dir: std.
     } else return error.PasswordNotFound;
 
     // Decrypt password
-    const decrypted = try field.decrypt_field(entry.password, &placeholder_key, allocator);
+    const decrypted = try field.decrypt_field(entry.password, &key, allocator);
     defer allocator.free(decrypted);
 
     // Run breach check
@@ -670,6 +672,6 @@ git commit -m "feat: add BreachCheckFailed error to taxonomy"
 - The breach check module (`src/core/breach_check.zig`) is mostly standalone — the local check and HIBP parsing don't depend on SP11/SP12. Only the CLI wiring in Task 3 depends on `password.zig` and `field.decrypt_field`.
 - The HIBP HTTP client in `hibp_check()` uses Zig 0.16's `std.http.Client`. Verify the exact API in the version you're building against — some method signatures may differ.
 - The `common_passwords.bin` data is embedded at compile time via `@embedFile`. The type coercion from a flat `[]u8` to `[]const [20]u8` uses `@ptrCast` + `@alignCast` which is safe because `[20]u8` has 1-byte alignment.
-- Exit code 5 is used for "breaches found" to distinguish from generic errors (code 1). This follows the existing exit code convention.
+- Breach findings remain report results and do not introduce a new exit code. Only an operation that cannot produce its report uses the global error taxonomy.
 - The `--prompt` flag for checking unsaved passwords is deferred per spec decision 14-8.
 - `load_passwords` in Task 3 is an SP11 function — verify the actual function name and signature used in the SP11 implementation.

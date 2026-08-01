@@ -1,10 +1,12 @@
 # Password Clipboard Copy Implementation Plan
 
+> **Status:** FUTURE
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `password show <id> --copy` to copy a stored password to the system clipboard (never printed) and auto-clear it after a timeout.
 
-**Architecture:** A new `src/core/clipboard.zig` shells out to the platform clipboard tool (auto-detected: `pbcopy` on macOS; `wl-copy`, `xclip`, or `xsel` on Linux) with pure, unit-testable `candidates`/argv builders and thin `copy`/`read`/`clear` wrappers over `std.process`. `password.zig` gains `--copy`/`--timeout` on the `show` subcommand: it decrypts (SP11 path), copies, prints the masked entry plus a confirmation, then foreground-blocks for the timeout and does a safe clear (only clears if the clipboard still holds our value). Config gains a `clipboard_timeout` default; errors gain a clipboard group.
+**Architecture:** A new `src/core/clipboard.zig` shells out to one detected platform clipboard backend with one stable `detect`/`copy`/`read`/`clear` API over `std.process`. `password.zig` gains `--copy`/`--timeout` on the `show` subcommand: it decrypts (SP11 path), copies, prints the masked entry plus a confirmation, then foreground-blocks for the timeout and does a safe clear (only clears if the clipboard still holds our value). Config gains a `clipboard_timeout` default; errors gain a clipboard group.
 
 **Tech Stack:** Zig 0.16 (`std.Io`, `std.process.spawn`/`run`, `std.Io.sleep`). No external dependencies — relies on platform clipboard tools present at runtime.
 
@@ -205,13 +207,13 @@ git commit -m "feat(config): add clipboard_timeout default (SP13)"
 - Produces:
   - `pub const Backend = enum { pbcopy, wl_copy, xclip, xsel };`
   - `pub const Error = error{ ClipboardToolNotFound, ClipboardCommandFailed };`
-  - `pub fn candidates(os_tag: std.Target.Os.Tag, has_wayland_display: bool) []const Backend`
+   - `pub fn detect(allocator: Allocator, environ: std.process.Environ) Error!Backend`
   - `pub fn copy_argv(b: Backend) []const []const u8`
   - `pub fn read_argv(b: Backend) []const []const u8`
   - `pub fn has_wayland(environ: std.process.Environ) bool`
-  - `pub fn copy(io: std.Io, cand: []const Backend, data: []const u8) Error!Backend`
-  - `pub fn read(gpa: Allocator, io: std.Io, b: Backend) Error![]u8` (caller owns the returned slice)
-  - `pub fn clear(gpa: Allocator, io: std.Io, b: Backend) Error!void`
+   - `pub fn copy(allocator: Allocator, io: std.Io, b: Backend, data: []const u8) Error!void`
+   - `pub fn read(allocator: Allocator, io: std.Io, b: Backend) Error![]u8` (caller owns the returned slice)
+   - `pub fn clear(allocator: Allocator, io: std.Io, b: Backend) Error!void`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -530,8 +532,8 @@ In the `show` handler, after SP11 has produced the decrypted `plaintext` (owned 
 defer std.crypto.secureZero(u8, plaintext); // wipe before the buffer is freed
 
 if (args.copy) {
-    const cand = clipboard.candidates(@import("builtin").os.tag, clipboard.has_wayland(environ));
-    const used = try clipboard.copy(io, cand, plaintext); // errors.ClipboardToolNotFound / ...CommandFailed
+    const used = try clipboard.detect(allocator, environ);
+    try clipboard.copy(allocator, io, used, plaintext); // errors.ClipboardToolNotFound / ...CommandFailed
 
     const timeout = resolve_timeout(args.timeout, cfg.clipboard_timeout);
     if (timeout == 0) {

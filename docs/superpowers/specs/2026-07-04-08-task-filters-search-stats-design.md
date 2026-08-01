@@ -1,6 +1,6 @@
 # Sub-project 08 — Task filters/search/stats (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-04
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 07 (Export/Import)
@@ -188,7 +188,7 @@ If `--search` is used, matching terms are highlighted via ANSI codes.
 - **`--sort` / ordering flags** — deferred. Default ordering is `created_at DESC`.
 - **Pagination** (`--limit`, `--offset`) — deferred until task counts grow.
 - **Tags/categories as filter criteria** — belongs in SP09.
-- **CSV export** — belongs in SP07 or later.
+- **CSV export** is not part of the JSON-only export design in SP07.
 - **Interactive filter prompts** — CLI flags only.
 
 ---

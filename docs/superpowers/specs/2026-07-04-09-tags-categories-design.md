@@ -1,6 +1,6 @@
 # Sub-project 09 — Tags & Categories (DESIGN)
 
-> **Status:** DESIGN APPROVED
+> **Status:** FUTURE
 > **Date:** 2026-07-04
 > **Parent doc:** [2026-06-30-tip-redesign-draft.md](2026-06-30-tip-redesign-draft.md)
 > **Predecessor:** Sub-project 08 (Task filters/search/stats)
@@ -126,13 +126,17 @@ Tags are not a field on `Task` directly — they live in the join table and are 
 ```sql
 CREATE TABLE categories (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
+    vault_id TEXT NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     created_at INTEGER NOT NULL
+    ,UNIQUE (vault_id, name)
 );
 
 CREATE TABLE tags (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE
+    vault_id TEXT NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    UNIQUE (vault_id, name)
 );
 
 CREATE TABLE task_tags (
@@ -142,7 +146,7 @@ CREATE TABLE task_tags (
 );
 ```
 
-Plus: `ALTER TABLE tasks ADD COLUMN category_id TEXT REFERENCES categories(id);`
+Plus: `ALTER TABLE tasks ADD COLUMN category_id TEXT REFERENCES categories(id) ON DELETE SET NULL;`
 
 ### SQL query integration (SP08 `build_where_clause`)
 
@@ -176,7 +180,7 @@ pub fn list(self: *Tags) ![]models.Tag;
 pub fn delete(self: *Tags, id: []const u8) !void;
 ```
 
-On `Vault.Tasks` (extended):
+On planned `Store.Tasks` (extended):
 
 ```zig
 // Existing methods unchanged

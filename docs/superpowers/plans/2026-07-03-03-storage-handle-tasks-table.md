@@ -380,7 +380,7 @@ git commit -m "feat: add tasks table migration"
   - `src/internal/database/migrate.zig::run_migrations`
 - Produces:
   - `pub const Vault` — open/close
-  - `pub const Vault.Tasks` — add/list/get_by_id/edit/delete/complete/start
+  - Planned `Vault.Tasks` — add/list/get_by_id/edit/delete/complete/start. The active API is `Tasks` with exact-ID `get`.
   - `pub const AddFields` / `pub const EditFields` — input structs
 
 - [x] **Step 1: Create `src/core/vault.zig` with full implementation and tests**
@@ -799,7 +799,7 @@ git commit -m "feat: add Vault handle with Tasks CRUD methods"
 - Note: `print_task` and `now_seconds` stay
 
 **Interfaces:**
-- Consumes: `Vault.open()`, `Vault.close()`, `Vault.Tasks.*` methods (Task 4).
+- Consumes: planned `Vault.open()`, `Vault.close()`, and `Vault.Tasks.*` methods (Task 4). The active implementation uses `Tasks` directly.
 - Produces: `pub fn dispatch_task_command(io: std.Io, environ: std.process.Environ, args: TaskArgs) !void`
 
 - [ ] **Step 1: Replace `dispatch_task_command` and remove old CRUD functions**
