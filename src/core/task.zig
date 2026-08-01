@@ -5,8 +5,6 @@ const ansi = @import("../utils/ansi.zig");
 const zqlite = @import("zqlite");
 const migrate = @import("../internal/database/migrate.zig");
 
-const task_columns = "id, title, description, status, priority, due_date, assigned_to, created_at, updated_at, completed_at";
-
 fn now_seconds(io: std.Io) i64 {
     return std.Io.Timestamp.now(io, .real).toSeconds();
 }
@@ -83,7 +81,11 @@ pub const Tasks = struct {
             },
         );
 
-        const row = (try self.conn.row("SELECT " ++ task_columns ++ " FROM tasks WHERE id = ?", .{id})) orelse return error.StorageFailure;
+        const row = (try self.conn.row(
+            \\SELECT id, title, description, status, priority,
+            \\       due_date, assigned_to, created_at, updated_at, completed_at
+            \\FROM tasks WHERE id = ?
+        , .{id})) orelse return error.StorageFailure;
         defer row.deinit();
 
         return try self.scan_task(row);
@@ -117,7 +119,11 @@ pub const Tasks = struct {
     }
 
     pub fn list(self: Tasks) ![]models.Task {
-        var result = try self.conn.rows("SELECT " ++ task_columns ++ " FROM tasks ORDER BY created_at ASC", .{});
+        var result = try self.conn.rows(
+            \\SELECT id, title, description, status, priority,
+            \\       due_date, assigned_to, created_at, updated_at, completed_at
+            \\FROM tasks ORDER BY created_at ASC
+        , .{});
         defer result.deinit();
 
         var tasks = std.ArrayList(models.Task).empty;
@@ -138,7 +144,11 @@ pub const Tasks = struct {
     }
 
     pub fn get(self: Tasks, id: []const u8) !models.Task {
-        if (try self.conn.row("SELECT " ++ task_columns ++ " FROM tasks WHERE id = ?", .{id})) |row| {
+        if (try self.conn.row(
+            \\SELECT id, title, description, status, priority,
+            \\       due_date, assigned_to, created_at, updated_at, completed_at
+            \\FROM tasks WHERE id = ?
+        , .{id})) |row| {
             defer row.deinit();
             return self.scan_task(row);
         }
