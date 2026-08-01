@@ -85,12 +85,52 @@ tip task add --title="Review code" --desc="Review PR #42"
 
 # List tasks
 tip task --list
+
+# Complete a task by its exact ID
+tip task complete --id=<id>
+
+# Start a task again
+tip task start --id=<id>
 ```
+
+## Commands
+
+```text
+tip --help
+tip --version
+tip task --help
+tip task --list
+tip task add --title=<title> [--desc=<description>]
+tip task edit --id=<id> --title=<title> [--desc=<description>]
+tip task delete --id=<id>
+tip task complete --id=<id>
+tip task start --id=<id>
+```
+
+Task commands use exact IDs. Prefix matching is not supported.
+
+## Storage
+
+Tip stores tasks in a SQLite database named `tip.db` inside its platform data
+directory:
+
+- Linux: `$XDG_DATA_HOME/tip`, or `~/.local/share/tip` when `XDG_DATA_HOME` is unset
+- macOS: `~/Library/Application Support/tip`
+- Windows: `%APPDATA%/tip`
+
+The database uses SQLite WAL mode and applies embedded migrations on startup.
+
+## Current limits
+
+- Tip currently manages local tasks only.
+- The CLI exposes task title and description fields. Priority, due date, and assignee are model fields but are not currently CLI options.
+- `complete` and `start` are status operations. Timestamp updates are not currently part of their reliable behavior.
+- Password management, encryption, multiple vaults, configuration, synchronization, remote storage, import/export, and server APIs are not implemented.
 
 ## Documentation
 
-- **[Roadmap](docs/ROADMAP.md)** - Development timeline and milestones
-- **[Architecture](docs/ARCHITECTURE.md)** - System design and technical details
+- [Superpowers plans](docs/superpowers/plans/) - Implementation plans and status
+- [Superpowers specs](docs/superpowers/specs/) - Design records and decisions
 
 ## Development
 
