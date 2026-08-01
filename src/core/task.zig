@@ -66,8 +66,8 @@ pub const Tasks = struct {
         try self.conn.exec(
             \\INSERT INTO tasks (
             \\    id, title, description, status,
-            \\    priority, due_date, assigned_to, created_at
-            \\) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            \\    priority, due_date, assigned_to, created_at, updated_at
+            \\) VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
         ,
             .{
                 id,
@@ -143,13 +143,13 @@ pub const Tasks = struct {
     }
 
     pub fn complete(self: Tasks, id: []const u8) !void {
-        try self.conn.exec("UPDATE tasks SET status = 'completed' WHERE id = ?", .{id});
+        try self.conn.exec("UPDATE tasks SET status = 'completed', updated_at = unixepoch() WHERE id = ?", .{id});
 
         if (self.conn.changes() == 0) return error.TaskNotFound;
     }
 
     pub fn start(self: Tasks, id: []const u8) !void {
-        try self.conn.exec("UPDATE tasks SET status = 'in_progress' WHERE id = ?", .{id});
+        try self.conn.exec("UPDATE tasks SET status = 'in_progress', updated_at = unixepoch() WHERE id = ?", .{id});
 
         if (self.conn.changes() == 0) return error.TaskNotFound;
     }
@@ -413,7 +413,7 @@ test "mark complete and timestamps" {
     try std.testing.expectEqual(all_tasks.len, 1);
 
     try std.testing.expectEqual(all_tasks[0].status, .completed);
-    try std.testing.expect(all_tasks[0].updated_at.? > task1.updated_at orelse 0);
+    try std.testing.expect(all_tasks[0].updated_at.? >= task1.updated_at orelse 0);
 }
 
 test "mark complete nonexistent task returns error" {
