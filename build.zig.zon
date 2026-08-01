@@ -9,7 +9,7 @@
             .hash = "flags-0.2.1-GjWK4inSAADhRL56XvkAh12bCDB_DDNHVAHVk2usi1nb",
         },
         .zqlite = .{
-            .url = "git+https://github.com/karlseguin/zqlite.zig?ref=master#a9c1cd3657315306856ddf4a8a28a11b10fd5a9d",
+            .url = "git+https://github.com/karlseguin/zqlite.zig#a9c1cd3657315306856ddf4a8a28a11b10fd5a9d",
             .hash = "zqlite-0.0.1-RWLaYyc7nABTzVzEpEMPi3qD8xJHi0a2ycNgL73XyEdt",
         },
     },
