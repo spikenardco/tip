@@ -7,7 +7,7 @@
 
 **Goal:** Replace the threaded `(allocator, io, dir, ...)` parameter pattern with a `Vault` handle owning shared context, migrate task CRUD from JSON to SQLite, and remove the JSON storage module.
 
-**Architecture:** A `Vault` handle wraps a `*zqlite.Conn` connection and exposes a `vault.tasks` child handle. Handle methods return data (no printing); the CLI layer in `task.zig` formats output. Platform directory resolution moves to `src/storage/dir.zig` with a comptime config. Ansi rendering helpers extract to `src/utils/ansi.zig`. Tasks table schema in `002_create_tasks.sql`.
+**Architecture:** A `Vault` owns a value `zqlite.Conn` and exposes task operations through `Tasks`. Handle methods return data (no printing); the CLI layer in `task.zig` formats output. Platform directory resolution moves to `src/storage/dir.zig` with a comptime config. ANSI rendering helpers extract to `src/utils/ansi.zig`. Tasks table schema lives in `001_create_tasks.sql`.
 
 **Tech Stack:** Zig 0.16 (`std.Io` async model), `zqlite` dependency, `zqlite` API.
 
@@ -323,26 +323,27 @@ git commit -m "feat: add storage/dir.zig with comptime platform config"
 
 ---
 
-### Task 3: Create `002_create_tasks.sql` migration
+### Task 3: Create `001_create_tasks.sql` migration
 
 **Files:**
-- Create: `src/internal/database/migrations/002_create_tasks.sql`
+- Update: `src/internal/database/migrations/001_create_tasks.sql`
 
 **Interfaces:**
-- Consumes: `001_create_schema_version.sql` and `002_create_tasks.sql` from sub-project 02.
-- Produces: tasks table and version 2 in `_schema_version`.
+- Consumes: the embedded migration runner from sub-project 02.
+- Produces: constrained tasks table and schema version 1 via `PRAGMA user_version`.
 
 - [x] **Step 1: Create the migration file**
 
-Create `src/internal/database/migrations/002_create_tasks.sql`:
+Use `src/internal/database/migrations/001_create_tasks.sql`:
 
 ```sql
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE tasks (
     id           TEXT PRIMARY KEY NOT NULL,
-    title        TEXT NOT NULL,
+    title        TEXT NOT NULL CHECK (length(trim(title)) > 0),
     description  TEXT,
-    status       TEXT NOT NULL DEFAULT 'pending',
-    priority     TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'in_progress', 'completed')),
+    priority     TEXT CHECK (priority IS NULL OR priority IN ('low', 'medium', 'high')),
     due_date     INTEGER,
     assigned_to  TEXT,
     created_at   INTEGER NOT NULL,
@@ -350,15 +351,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-
-INSERT OR IGNORE INTO _schema_version (version) VALUES (2);
+PRAGMA user_version = 1;
 ```
 
 - [x] **Step 2: Commit**
 
 ```bash
-git add src/internal/database/migrations/002_create_tasks.sql
+git add src/internal/database/migrations/001_create_tasks.sql
 git commit -m "feat: add tasks table migration"
 ```
 
@@ -480,12 +479,12 @@ pub const Vault = struct {
             );
 
             // Read back to return a fully populated struct
-            const row = (try self.vault.db.row("SELECT * FROM tasks WHERE id = ?", .{id})) orelse return error.StorageFailure;
+            const row = (try self.vault.db.row("SELECT id, title, description, status, priority, due_date, assigned_to, created_at, updated_at, completed_at FROM tasks WHERE id = ?", .{id})) orelse return error.StorageFailure;
             return scanTask(row);
         }
 
         pub fn list(self: *Tasks, allocator: std.mem.Allocator) ![]models.Task {
-            var result = try self.vault.db.rows("SELECT * FROM tasks ORDER BY created_at ASC", .{});
+            var result = try self.vault.db.rows("SELECT id, title, description, status, priority, due_date, assigned_to, created_at, updated_at, completed_at FROM tasks ORDER BY created_at ASC", .{});
             defer result.deinit();
 
             var list = std.ArrayList(models.Task).empty;
@@ -499,7 +498,7 @@ pub const Vault = struct {
 
         pub fn get_by_id(self: *Tasks, allocator: std.mem.Allocator, id: []const u8) !models.Task {
             // Exact match first
-            if (try self.vault.db.row("SELECT * FROM tasks WHERE id = ?", .{id})) |row| {
+            if (try self.vault.db.row("SELECT id, title, description, status, priority, due_date, assigned_to, created_at, updated_at, completed_at FROM tasks WHERE id = ?", .{id})) |row| {
                 return scanTask(row);
             }
 
@@ -507,7 +506,7 @@ pub const Vault = struct {
             const pattern = try std.mem.concat(allocator, u8, &.{ id, "%" });
             defer allocator.free(pattern);
 
-            var result = try self.vault.db.rows("SELECT * FROM tasks WHERE id LIKE ? ORDER BY id", .{pattern});
+            var result = try self.vault.db.rows("SELECT id, title, description, status, priority, due_date, assigned_to, created_at, updated_at, completed_at FROM tasks WHERE id LIKE ? ORDER BY id", .{pattern});
             defer result.deinit();
 
             var count: usize = 0;

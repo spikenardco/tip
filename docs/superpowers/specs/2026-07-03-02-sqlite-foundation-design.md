@@ -16,11 +16,12 @@ This sub-project wires SQLite into the build, adds the `db.zig` connection modul
 |---|----------|--------|
 | F1 | **zqlite** is the dependency — [karlseguin/zqlite.zig](https://github.com/karlseguin/zqlite.zig), which bundles its own `sqlite3.c` amalgamation. | LOCKED |
 | F2 | **Embedded `.sql` files** via `@embedFile`, not read from disk. | LOCKED |
-| F3 | **Simple version-counter** in `_schema_version` table (`INTEGER`). | LOCKED |
+| F3 | **SQLite `PRAGMA user_version`** is the single schema version source. | IMPLEMENTED |
 | F4 | **Migrations numbered `NNN_*.sql`** in `src/internal/database/migrations/`. | LOCKED |
 | F5 | **Migration transaction behavior.** The original design used one transaction per migration; the active runner uses one transaction for the migration batch. | IMPLEMENTED WITH DEVIATIONS |
 | F6 | **In-memory SQLite** for tests (`zqlite.open(":memory:", flags)`). | LOCKED |
-| F7 | **WAL mode** enabled on open (`PRAGMA journal_mode=WAL`). | LOCKED |
+| F7 | **WAL mode** enabled on open (`PRAGMA journal_mode=WAL`). | IMPLEMENTED |
+| F8 | **Foreign keys and busy timeout** configured on every opened connection. | IMPLEMENTED |
 
 ---
 
@@ -67,28 +68,41 @@ src/internal/database/
   db.zig
   migrate.zig
   migrations/
-    001_create_schema_version.sql
+    001_create_tasks.sql
 ```
 
 ### Runner behavior
 
-- `run_migrations(db)` checks `SELECT version FROM _schema_version` (returns 0 if table missing).
-- Applies the embedded migrations in numeric order. The active set is `001_create_schema_version.sql` and `002_create_tasks.sql`.
+- `run_migrations(conn)` reads `PRAGMA user_version` after `BEGIN IMMEDIATE`.
+- Applies explicitly embedded migrations in numeric order. The active set contains only `001_create_tasks.sql`.
 - The 3-digit prefix is the version number.
-- Applies each where `version > current_version` inside the active migration batch transaction.
-- After each migration, updates `_schema_version.version` to the applied number.
-- Fails hard on error — partial state is contained within one failed migration.
+- Applies every pending migration inside one transaction.
+- Each migration ends by setting `PRAGMA user_version` and the runner verifies the resulting version.
+- Rejects future, negative, or non-contiguous versions and rolls back every pre-commit error.
 
-### `001_create_schema_version.sql` content
+### `001_create_tasks.sql` content
 
-Placeholder for this sub-project — enough to prove the runner works:
+Current version-one migration:
 
 ```sql
-CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER NOT NULL);
-INSERT INTO _schema_version (version) VALUES (1);
+CREATE TABLE tasks (
+    id           TEXT PRIMARY KEY NOT NULL,
+    title        TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    description  TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'in_progress', 'completed')),
+    priority     TEXT CHECK (priority IS NULL OR priority IN ('low', 'medium', 'high')),
+    due_date     INTEGER,
+    assigned_to  TEXT,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER,
+    completed_at INTEGER
+);
+
+PRAGMA user_version = 1;
 ```
 
-The Tasks table schema and real data migrations are added in sub-project 03.
+Future schema changes must use additional numbered migration files.
 
 ---
 
@@ -96,9 +110,12 @@ The Tasks table schema and real data migrations are added in sub-project 03.
 
 All tests use `zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode)`:
 
-- **`migrations run from scratch`** — open in-memory, run migrations, verify `_schema_version.version == 1`.
-- **`migrations are idempotent`** — run twice, no error, version stays 1.
-- **`migration ordering`** — if 001 and 002 .sql files exist, verify both applied, version = 2.
+- **`migrations run from scratch`** — open in-memory, run migrations, verify `PRAGMA user_version == 1` and the tasks table exists.
+- **`migrations are idempotent`** — run twice, no error, version stays 1, and no `_schema_version` table exists.
+- **`constraints`** — empty titles and invalid status/priority values are rejected.
+- **`future versions`** — a database with a higher `user_version` is rejected without schema changes.
+- **`rollback`** — a conflicting object causes migration failure without changing schema or version.
+- **`legacy databases`** — databases using `_schema_version` are rejected rather than repaired.
 
 ---
 
@@ -117,11 +134,10 @@ All tests use `zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlag
 - zqlite, WAL mode, embedded SQL, and in-memory migration tests are present.
 - `db.open` accepts a NUL-terminated database path. Platform data-directory resolution is
   outside this module, not part of its public API.
-- The active migration set is `001_create_schema_version.sql` plus `002_create_tasks.sql`.
-  The runner creates `_schema_version`, then applies pending SQL in one `BEGIN IMMEDIATE`
-  transaction and commits version 2. This differs from the planned one-transaction-per-
-  migration runner.
-- Migration 001 contains only the version insert because table creation is done by the runner.
+- The active migration set is `001_create_tasks.sql`.
+  The runner reads and writes `PRAGMA user_version`, applies pending SQL in one `BEGIN IMMEDIATE`
+  transaction, and commits version 1.
+- Existing `_schema_version` databases are an intentional clean break and must be recreated.
 
 ## Next step
 

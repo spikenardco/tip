@@ -47,8 +47,7 @@ src/
       db.zig         - raw connection (sub-project 02)
       migrate.zig    - migration runner (sub-project 02)
       migrations/
-        001_create_schema_version.sql - _schema_version (sub-project 02)
-        002_create_tasks.sql   - tasks table (NEW)
+        001_create_tasks.sql   - tasks table (sub-project 02)
   main.zig
 ```
 
@@ -133,15 +132,16 @@ pub fn open_data_dir(allocator: std.mem.Allocator, io: std.Io, environ: std.proc
 
 ---
 
-## Part B — Tasks table schema (`002_create_tasks.sql`)
+## Part B — Tasks table schema (`001_create_tasks.sql`)
 
 ```sql
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE tasks (
     id           TEXT PRIMARY KEY NOT NULL,
-    title        TEXT NOT NULL,
+    title        TEXT NOT NULL CHECK (length(trim(title)) > 0),
     description  TEXT,
-    status       TEXT NOT NULL DEFAULT 'pending',
-    priority     TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'in_progress', 'completed')),
+    priority     TEXT CHECK (priority IS NULL OR priority IN ('low', 'medium', 'high')),
     due_date     INTEGER,
     assigned_to  TEXT,
     created_at   INTEGER NOT NULL,
@@ -149,9 +149,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-
-INSERT OR IGNORE INTO _schema_version (version) VALUES (2);
+PRAGMA user_version = 1;
 ```
 
 ### Column rationale
@@ -159,7 +157,9 @@ INSERT OR IGNORE INTO _schema_version (version) VALUES (2);
 - `status TEXT` — `'pending'`, `'in_progress'`, `'completed'`. Readable in sqlite3 shell.
 - `priority TEXT` — `'low'`, `'medium'`, `'high'`, or NULL.
 - `due_date` / `created_at` / `updated_at` / `completed_at` — INTEGER (Unix seconds, `i64`).
-- No foreign keys yet (vaults arrive in sub-project 06).
+- No foreign keys yet (vaults remain planned for sub-project 06).
+- No status index: current list query loads and sorts all tasks in Zig.
+- Task reads use the explicit schema-order column list rather than `SELECT *`.
 
 ---
 

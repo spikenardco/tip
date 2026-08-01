@@ -368,11 +368,11 @@ record.** One brainstorming question at a time.
   `generate_id` returns a value `[26]u8` rather than the planned allocator-owned slice.
   `main` centralizes task-error rendering, but argument parsing exits directly with code 2.
   `AmbiguousPrefix` is mapped to exit code 4, not the design text's code 3.
-- **SP02:** zqlite, WAL, embedded migrations, and in-memory tests are implemented. The
-  connection API is `db.open(path)`; directory resolution is handled outside `db.zig`.
-  Migration startup creates `_schema_version`, runs migration 001 and 002 in one
-  `BEGIN IMMEDIATE` transaction, and reaches version 2. This is not one transaction per
-  migration as originally designed.
+- **SP02:** zqlite, WAL, foreign-key enforcement, busy timeout, embedded migrations, and
+  in-memory tests are implemented. The connection API is `db.open(path)`; directory
+  resolution is handled outside `db.zig`. Migration startup reads `PRAGMA user_version`,
+  applies the explicit `001_create_tasks.sql` migration in one `BEGIN IMMEDIATE` transaction,
+  and reaches version 1. Existing `_schema_version` databases are intentionally unsupported.
 - **SP03:** the SQLite Tasks table and `Vault`/`Tasks` architecture are present, but the
   planned `get_by_id` prefix lookup, JSON migration/removal completion, and planned slim CLI
   shape are not all present. `Vault` owns a value `zqlite.Conn`; `Tasks` stores the same

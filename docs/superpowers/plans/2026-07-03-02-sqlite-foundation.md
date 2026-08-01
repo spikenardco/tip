@@ -233,28 +233,41 @@ git commit -m "feat: add sqlite database connection module"
 
 ---
 
-### Task 3: Migration runner + first `.sql` migration
+### Task 3: Migration runner + task `.sql` migration
 
 **Files:**
-- Create: `src/internal/database/migrations/001_create_schema_version.sql`
+- Create: `src/internal/database/migrations/001_create_tasks.sql`
 - Create: `src/internal/database/migrate.zig`
 - Test: `src/internal/database/migrate.zig` (tests live in same file)
 
 **Interfaces:**
-- Consumes: `*zqlite.Conn` from Task 2 and the embedded schema-version migration.
-- Produces: `pub fn run_migrations(db: *zqlite.Conn) !void`
-- Data: `001_create_schema_version.sql` contains the `_schema_version` table setup.
+- Consumes: `zqlite.Conn` from Task 2 and explicitly embedded SQL migrations.
+- Produces: `pub fn run_migrations(conn: zqlite.Conn) !void`
+- Data: `001_create_tasks.sql` contains the task schema and final `PRAGMA user_version = 1`.
 
 - [x] **Step 1: Create the first migration file**
 
-Create `src/internal/database/migrations/001_create_schema_version.sql`:
+Create `src/internal/database/migrations/001_create_tasks.sql`:
 
 ```sql
-CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER NOT NULL);
-INSERT INTO _schema_version (version) VALUES (1);
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY NOT NULL,
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'in_progress', 'completed')),
+    priority TEXT CHECK (priority IS NULL OR priority IN ('low', 'medium', 'high')),
+    due_date INTEGER,
+    assigned_to TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER,
+    completed_at INTEGER
+);
+
+PRAGMA user_version = 1;
 ```
 
-This is intentionally minimal — it proves the runner works. The Tasks table and real schema land in sub-project 03.
+The migration is the version-one task schema. Numbered migrations must set `PRAGMA user_version` to their own contiguous version as their final statement.
 
 - [x] **Step 2: Write the failing tests**
 
@@ -271,7 +284,7 @@ test "migrations run from scratch" {
 
     try migrate.run_migrations(&conn);
 
-    const version_row = (try conn.row("SELECT version FROM _schema_version", .{})) orelse unreachable;
+    const version_row = (try conn.row("PRAGMA user_version", .{})) orelse unreachable;
     try std.testing.expectEqual(@as(i64, 1), version_row.int(0));
 }
 
@@ -282,7 +295,7 @@ test "migrations are idempotent" {
     try migrate.run_migrations(&conn);
     try migrate.run_migrations(&conn);
 
-    const version_row = (try conn.row("SELECT version FROM _schema_version", .{})) orelse unreachable;
+    const version_row = (try conn.row("PRAGMA user_version", .{})) orelse unreachable;
     try std.testing.expectEqual(@as(i64, 1), version_row.int(0));
 }
 ```
@@ -305,21 +318,34 @@ const zqlite = @import("zqlite");
 
 /// Ordered list of migration SQL embedded at compile time.
 /// Each migration is a numbered `.sql` file in the migrations directory.
-const migrations = struct {
-    const v1 = @embedFile("migrations/001_create_schema_version.sql");
+const migrations = [_][*:0]const u8{
+    @embedFile("migrations/001_create_tasks.sql"),
 };
 
-/// Runs pending migrations in order. Each migration runs in its own
-/// transaction. Idempotent — safe to call on every app startup.
-pub fn run_migrations(db: *zqlite.Conn) !void {
-    const current_version: i64 = if (db.row(
-        "SELECT COALESCE(MAX(version), 0) FROM _schema_version",
-        .{},
-    ) catch null) |row| row.int(0) else 0;
+fn read_schema_version(conn: zqlite.Conn) !usize {
+    const row = (try conn.row("PRAGMA user_version", .{})) orelse return error.StorageFailure;
+    defer row.deinit();
 
-    if (current_version < 1) {
-        try db.exec(migrations.v1, .{});
+    const version = row.int(0);
+    if (version < 0) return error.UnsupportedSchemaVersion;
+    return @intCast(version);
+}
+
+pub fn run_migrations(conn: zqlite.Conn) !void {
+    try conn.execNoArgs("BEGIN IMMEDIATE");
+    errdefer conn.rollback();
+
+    const current_version = try read_schema_version(conn);
+    if (current_version > migrations.len) return error.UnsupportedSchemaVersion;
+
+    for (current_version..migrations.len) |version| {
+        try conn.execNoArgs(migrations[version]);
+        if (try read_schema_version(conn) != version + 1) {
+            return error.InvalidMigrationVersion;
+        }
     }
+
+    try conn.commit();
 }
 ```
 
@@ -334,7 +360,7 @@ Expected: PASS — both migration tests pass.
 - [x] **Step 6: Commit**
 
 ```bash
-git add src/internal/database/migrations/001_create_schema_version.sql src/internal/database/migrate.zig
+git add src/internal/database/migrations/001_create_tasks.sql src/internal/database/migrate.zig
 git commit -m "feat: add migration runner with embedded sql files"
 ```
 
@@ -345,9 +371,9 @@ git commit -m "feat: add migration runner with embedded sql files"
 **Spec coverage (against [2026-07-03-02 design](../specs/2026-07-03-02-sqlite-foundation-design.md)):**
 - F1 zqlite dependency → Task 1 Step 1.
 - F2 embedded `.sql` files → Task 3 (via `@embedFile`).
-- F3 version counter in `_schema_version` → Task 3 Step 4 (`SELECT COALESCE(MAX(version), 0)`).
-- F4 numbered `NNN_*.sql` files → Task 3 Step 1 (`001_create_schema_version.sql`).
-- F5 each migration its own transaction → Task 3 Step 4 (each version block is a separate `db.exec`).
+- F3 SQLite schema version → Task 3 runner (`PRAGMA user_version`).
+- F4 numbered `NNN_*.sql` files → Task 3 Step 1 (`001_create_tasks.sql`).
+- F5 one transaction around the migration batch → Task 3 Step 4.
 - F6 in-memory tests → Task 3 Steps 2/5 (`zqlite.open(":memory:", zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode)`).
 - F7 WAL mode → Task 2 Step 3 (`PRAGMA journal_mode = WAL`).
 

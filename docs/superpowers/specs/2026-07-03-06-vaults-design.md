@@ -111,7 +111,7 @@ ALTER TABLE tasks_new RENAME TO tasks;
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_vault ON tasks(vault_id);
 
-INSERT OR IGNORE INTO _schema_version (version) VALUES (3);
+PRAGMA user_version = 3;
 ```
 
 > **Note on the `personal` id:** the migration needs a concrete ULID for the seed vault. Options:
