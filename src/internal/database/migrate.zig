@@ -71,6 +71,7 @@ test "migrations create tasks table" {
     );
 
     if (try conn.row("SELECT title FROM tasks WHERE id = ?", .{"001"})) |row| {
+        defer row.deinit();
         try std.testing.expectEqualStrings("Test Task", row.text(0));
     }
 }

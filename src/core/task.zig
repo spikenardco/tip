@@ -139,6 +139,7 @@ pub const Tasks = struct {
 
     pub fn get(self: Tasks, id: []const u8) !models.Task {
         if (try self.conn.row("SELECT " ++ task_columns ++ " FROM tasks WHERE id = ?", .{id})) |row| {
+            defer row.deinit();
             return self.scan_task(row);
         }
 
