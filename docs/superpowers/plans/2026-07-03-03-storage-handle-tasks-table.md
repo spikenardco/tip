@@ -329,7 +329,7 @@ git commit -m "feat: add storage/dir.zig with comptime platform config"
 - Create: `src/internal/database/migrations/002_create_tasks.sql`
 
 **Interfaces:**
-- Consumes: `001_create_tasks.sql` (sub-project 02) must exist with `_schema_version` table.
+- Consumes: `001_create_schema_version.sql` and `002_create_tasks.sql` from sub-project 02.
 - Produces: tasks table and version 2 in `_schema_version`.
 
 - [x] **Step 1: Create the migration file**

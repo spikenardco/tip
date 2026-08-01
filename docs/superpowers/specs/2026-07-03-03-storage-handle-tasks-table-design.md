@@ -47,7 +47,7 @@ src/
       db.zig         - raw connection (sub-project 02)
       migrate.zig    - migration runner (sub-project 02)
       migrations/
-        001_create_tasks.sql   - _schema_version (sub-project 02)
+        001_create_schema_version.sql - _schema_version (sub-project 02)
         002_create_tasks.sql   - tasks table (NEW)
   main.zig
 ```

@@ -125,8 +125,8 @@ These tests live in `src/core/task.zig` (alongside existing dispatch tests) or i
 - The active command contract is exact IDs. This is intentional: no prefix ambiguity exists in
   the current implementation, and no `LIKE` lookup or ambiguity-count UX was added.
 - The design's confirmation output and CLI-level ambiguity handling are not current behavior.
-- The implementation has a known timestamp/status defect in the underlying `complete`/`start`
-  SQL; the two related tests fail in the current baseline.
+- The current local source edit leaves 7 of 24 tests failing, including task inserts and
+  complete/start coverage. Source changes are outside this documentation pass.
 
 ## Next step
 

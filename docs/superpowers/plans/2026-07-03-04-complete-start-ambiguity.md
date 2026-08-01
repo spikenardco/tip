@@ -13,7 +13,8 @@
 
 > **Baseline note:** The command variants and dispatch arms exist, but dispatch uses exact IDs,
 > does not emit the planned confirmations, and does not implement prefix counting. The known
-> `complete`/`start` SQL timestamp/status defect leaves two tests failing.
+> The current local source edit leaves 7 of 24 tests failing, including task inserts and
+> complete/start coverage. Source changes are outside this documentation pass.
 
 **Dependency:** This plan relies on the active `Tasks.complete()` and `Tasks.start()` methods from `src/core/task.zig`.
 
