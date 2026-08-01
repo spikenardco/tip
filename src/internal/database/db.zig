@@ -10,7 +10,8 @@ pub fn open(db_path: [:0]const u8) !zqlite.Conn {
 
     try conn.execNoArgs("PRAGMA foreign_keys = ON");
     try conn.execNoArgs("PRAGMA busy_timeout = 5000");
-    try conn.exec("PRAGMA journal_mode = WAL", .{});
+    try conn.execNoArgs("PRAGMA journal_mode = WAL");
+
     return conn;
 }
 
