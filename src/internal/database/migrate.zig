@@ -5,11 +5,14 @@ const migrations = [_][*:0]const u8{
     @embedFile("migrations/001_create_tasks.sql"),
 };
 
-fn read_schema_version(conn: zqlite.Conn) !i64 {
+fn read_schema_version(conn: zqlite.Conn) !usize {
     const row = (try conn.row("PRAGMA user_version", .{})) orelse return error.StorageFailure;
     defer row.deinit();
 
-    return row.int(0);
+    const version = row.int(0);
+    if (version < 0) return error.UnsupportedSchemaVersion;
+
+    return @intCast(version);
 }
 
 pub fn run_migrations(conn: zqlite.Conn) !void {
@@ -17,16 +20,15 @@ pub fn run_migrations(conn: zqlite.Conn) !void {
     errdefer conn.rollback();
 
     const current_version = try read_schema_version(conn);
-    const latest_version: i64 = @intCast(migrations.len);
 
-    if (current_version < 0 or current_version > latest_version)
+    if (current_version > migrations.len) {
         return error.UnsupportedSchemaVersion;
+    }
 
-    const first_pending_version: usize = @intCast(current_version);
-    const latest_version_index: usize = @intCast(latest_version);
-    for (first_pending_version..latest_version_index) |version| {
+    for (current_version..migrations.len) |version| {
         try conn.execNoArgs(migrations[version]);
-        if (try read_schema_version(conn) != @as(i64, @intCast(version + 1))) {
+
+        if (try read_schema_version(conn) != version + 1) {
             return error.InvalidMigrationVersion;
         }
     }
@@ -40,7 +42,7 @@ test "migrations run from scratch" {
 
     try run_migrations(conn);
 
-    try std.testing.expectEqual(@as(i64, 1), try read_schema_version(conn));
+    try std.testing.expectEqual(@as(usize, 1), try read_schema_version(conn));
 }
 
 test "migrations are idempotent" {
@@ -50,7 +52,7 @@ test "migrations are idempotent" {
     try run_migrations(conn);
     try run_migrations(conn);
 
-    try std.testing.expectEqual(@as(i64, 1), try read_schema_version(conn));
+    try std.testing.expectEqual(@as(usize, 1), try read_schema_version(conn));
 
     if (try conn.row(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_schema_version'",
@@ -108,7 +110,7 @@ test "future schema versions are rejected" {
 
     try conn.execNoArgs("PRAGMA user_version = 2");
     try std.testing.expectError(error.UnsupportedSchemaVersion, run_migrations(conn));
-    try std.testing.expectEqual(@as(i64, 2), try read_schema_version(conn));
+    try std.testing.expectEqual(@as(usize, 2), try read_schema_version(conn));
 }
 
 test "failed migration rolls back schema changes" {
@@ -118,7 +120,7 @@ test "failed migration rolls back schema changes" {
     try conn.execNoArgs("CREATE TABLE tasks (id TEXT)");
 
     try std.testing.expectError(error.Error, run_migrations(conn));
-    try std.testing.expectEqual(@as(i64, 0), try read_schema_version(conn));
+    try std.testing.expectEqual(@as(usize, 0), try read_schema_version(conn));
 }
 
 test "legacy schema is not repaired" {
@@ -132,5 +134,5 @@ test "legacy schema is not repaired" {
     );
 
     try std.testing.expectError(error.Error, run_migrations(conn));
-    try std.testing.expectEqual(@as(i64, 0), try read_schema_version(conn));
+    try std.testing.expectEqual(@as(usize, 0), try read_schema_version(conn));
 }
