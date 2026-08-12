@@ -221,7 +221,6 @@ pub const Tasks = struct {
     fn print_task_summary(self: Tasks, task: models.Task) !void {
         const c_status = ansi.status_color(task.status);
         const c_reset = ansi.ansi_code(.reset);
-        const compact_id = if (task.id.len > 8) task.id[0..8] else task.id;
         const now = now_seconds(self.io);
 
         std.debug.print("  {s}{s}{s} ", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
@@ -248,7 +247,7 @@ pub const Tasks = struct {
             }
         }
 
-        std.debug.print("      {s}ID: {s}{s}\n", .{ ansi.ansi_code(.yellow), compact_id, c_reset });
+        std.debug.print("      {s}ID: {s}{s}\n", .{ ansi.ansi_code(.yellow), task.id, c_reset });
     }
 };
 
