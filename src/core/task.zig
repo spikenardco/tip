@@ -168,6 +168,16 @@ pub const Tasks = struct {
         if (self.conn.changes() == 0) return error.TaskNotFound;
     }
 
+    pub fn show(self: Tasks, id: []const u8) !void {
+        if (try self.conn.row("SELECT * FROM tasks WHERE id = ?", .{id})) |row| {
+            defer row.deinit();
+            const task = try self.scan_task(row);
+            try self.print_task_summary(task);
+        } else {
+            return error.TaskNotFound;
+        }
+    }
+
     fn print_task_list(self: Tasks, tasks: []const models.Task) !void {
         if (tasks.len == 0) {
             std.debug.print("No tasks\n", .{});
@@ -263,6 +273,9 @@ pub const TaskArgs = struct {
         start: struct {
             id: []const u8,
         },
+        show: struct {
+            id: []const u8,
+        },
     } = null,
 
     pub const help =
@@ -282,7 +295,8 @@ pub const TaskArgs = struct {
         \\      --desc=<description>  New description
         \\  delete
         \\      --id=<id>             Task ID to delete
-        \\
+        \\  show
+        \\      --id=<id>             Show task details
         \\Examples:
         \\  tip task --list
         \\  tip task add --title="Review code"
@@ -309,6 +323,7 @@ pub fn dispatch(tasks: Tasks, args: TaskArgs) !void {
             .delete => |fields| try tasks.delete(fields.id),
             .complete => |fields| try tasks.complete(fields.id),
             .start => |fields| try tasks.start(fields.id),
+            .show => |fields| try tasks.show(fields.id),
         }
         return;
     }
@@ -487,4 +502,14 @@ test "start task" {
 
     const all_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(all_tasks[0].status, .in_progress);
+}
+
+test "show task" {
+    var fixture = try TestTasks.init();
+    defer fixture.deinit();
+
+    const task1 = try fixture.tasks.add(.{ .title = "Test Task" });
+    try fixture.tasks.show(task1.id);
+
+    try std.testing.expectError(error.TaskNotFound, fixture.tasks.show("001"));
 }
