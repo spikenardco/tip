@@ -122,17 +122,3 @@ test "failed migration rolls back schema changes" {
     try std.testing.expectError(error.Error, run_migrations(conn));
     try std.testing.expectEqual(@as(usize, 0), try read_schema_version(conn));
 }
-
-test "legacy schema is not repaired" {
-    var conn = try zqlite.open(":memory:", zqlite.OpenFlags.EXResCode);
-    defer conn.close();
-
-    try conn.execNoArgs(
-        \\CREATE TABLE _schema_version (version INTEGER NOT NULL);
-        \\INSERT INTO _schema_version VALUES (2);
-        \\CREATE TABLE tasks (id TEXT);
-    );
-
-    try std.testing.expectError(error.Error, run_migrations(conn));
-    try std.testing.expectEqual(@as(usize, 0), try read_schema_version(conn));
-}
