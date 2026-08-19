@@ -1,12 +1,47 @@
 const std = @import("std");
 const models = @import("models.zig");
 const generate = @import("../utils/generate.zig");
-const ansi = @import("../utils/ansi.zig");
+const output = @import("../utils/output.zig");
 const zqlite = @import("zqlite");
 const migrate = @import("../internal/database/migrate.zig");
 
 fn now_seconds(io: std.Io) i64 {
     return std.Io.Timestamp.now(io, .real).toSeconds();
+}
+
+fn status_icon(status: models.Task.Status) []const u8 {
+    return switch (status) {
+        .pending => "○",
+        .in_progress => "⟳",
+        .completed => "✓",
+    };
+}
+
+fn status_label(status: models.Task.Status) []const u8 {
+    return switch (status) {
+        .pending => "Pending",
+        .in_progress => "In Progress",
+        .completed => "Completed",
+    };
+}
+
+fn priority_glyph(priority: ?models.Task.Priority) []const u8 {
+    if (priority) |p| {
+        return switch (p) {
+            .high => "↑",
+            .medium => "-",
+            .low => "↓",
+        };
+    }
+    return "";
+}
+
+fn priority_label(priority: models.Task.Priority) []const u8 {
+    return switch (priority) {
+        .high => "High",
+        .medium => "Medium",
+        .low => "Low",
+    };
 }
 
 const AddFields = struct {
@@ -172,7 +207,7 @@ pub const Tasks = struct {
         if (try self.conn.row("SELECT * FROM tasks WHERE id = ?", .{id})) |row| {
             defer row.deinit();
             const task = try self.scan_task(row);
-            try self.print_task_summary(task);
+            try self.print_task_detail(task);
         } else {
             return error.TaskNotFound;
         }
@@ -184,70 +219,86 @@ pub const Tasks = struct {
             return;
         }
 
-        const Group = struct {
-            status: models.Task.Status,
-            label: []const u8,
-            color: ansi.Ansi,
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+
+        const columns = [_]output.Column{
+            .{ .header = "ID" },
+            .{ .header = "Status" },
+            .{ .header = "Priority" },
+            .{ .header = "Title" },
+            .{ .header = "Created" },
         };
-        const groups = [_]Group{
-            .{ .status = .pending, .label = "Pending", .color = .cyan },
-            .{ .status = .in_progress, .label = "In Progress", .color = .cyan },
-            .{ .status = .completed, .label = "Completed", .color = .green },
-        };
 
-        for (groups) |group| {
-            var count: usize = 0;
-            for (tasks) |item| {
-                if (item.status == group.status) count += 1;
-            }
-            if (count == 0) continue;
+        var rows = std.ArrayList([]const []const u8).empty;
+        defer rows.deinit(allocator);
 
-            std.debug.print("{s}{s}{s} ({d})\n", .{
-                ansi.ansi_code(group.color),
-                group.label,
-                ansi.ansi_code(.reset),
-                count,
-            });
-
-            for (tasks) |item| {
-                if (item.status == group.status) {
-                    try self.print_task_summary(item);
-                }
-            }
-            std.debug.print("\n", .{});
+        for (tasks) |t| {
+            const status_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ status_icon(t.status), status_label(t.status) });
+            const priority_str = if (t.priority) |p|
+                try std.fmt.allocPrint(allocator, "{s} {s}", .{ priority_glyph(p), priority_label(p) })
+            else
+                "";
+            const created_str = try std.fmt.allocPrint(allocator, "{d}", .{t.created_at});
+            const row = try allocator.alloc([]const u8, 5);
+            row[0] = t.id;
+            row[1] = status_str;
+            row[2] = priority_str;
+            row[3] = t.title;
+            row[4] = created_str;
+            try rows.append(allocator, row);
         }
+
+        output.render_table(&columns, rows.items);
     }
 
-    fn print_task_summary(self: Tasks, task: models.Task) !void {
-        const c_status = ansi.status_color(task.status);
-        const c_reset = ansi.ansi_code(.reset);
-        const now = now_seconds(self.io);
+    fn print_task_detail(self: Tasks, task: models.Task) !void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
 
-        std.debug.print("  {s}{s}{s} ", .{ ansi.ansi_code(c_status), ansi.status_icon(task.status), c_reset });
-        if (task.priority) |p| {
-            std.debug.print("{s} ", .{ansi.priority_glyph(p)});
+        var fields = std.ArrayList(output.Field).empty;
+        defer fields.deinit(allocator);
+
+        try fields.append(allocator, .{ .label = "ID", .value = task.id });
+        try fields.append(allocator, .{ .label = "Title", .value = task.title });
+
+        if (task.description) |d| {
+            try fields.append(allocator, .{ .label = "Description", .value = d });
         }
-        std.debug.print("{s}\n", .{task.title});
 
-        if (task.description) |desc| {
-            std.debug.print("      {s}desc:{s} {s}\n", .{ ansi.ansi_code(.yellow), c_reset, desc });
+        const status_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ status_icon(task.status), status_label(task.status) });
+        try fields.append(allocator, .{ .label = "Status", .value = status_str });
+
+        if (task.priority) |p| {
+            const priority_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ priority_glyph(p), priority_label(p) });
+            try fields.append(allocator, .{ .label = "Priority", .value = priority_str });
         }
 
         if (task.due_date) |due| {
-            if (due < now) {
-                std.debug.print("      {s}Due: {d} (overdue){s}\n", .{ ansi.ansi_code(.red), due, c_reset });
-            } else {
-                std.debug.print("      {s}Due: {d}{s}\n", .{ ansi.ansi_code(.yellow), due, c_reset });
-            }
+            const due_str = try std.fmt.allocPrint(allocator, "{d}", .{due});
+            try fields.append(allocator, .{ .label = "Due", .value = due_str });
         }
 
-        if (task.status == .completed) {
-            if (task.completed_at) |completed_at| {
-                std.debug.print("      {s}Completed: {d}{s}\n", .{ ansi.ansi_code(.green), completed_at, c_reset });
-            }
+        if (task.assigned_to) |a| {
+            try fields.append(allocator, .{ .label = "Assigned To", .value = a });
         }
 
-        std.debug.print("      {s}ID: {s}{s}\n", .{ ansi.ansi_code(.yellow), task.id, c_reset });
+        const created_str = try std.fmt.allocPrint(allocator, "{d}", .{task.created_at});
+        try fields.append(allocator, .{ .label = "Created", .value = created_str });
+
+        if (task.updated_at) |u| {
+            const updated_str = try std.fmt.allocPrint(allocator, "{d}", .{u});
+            try fields.append(allocator, .{ .label = "Updated", .value = updated_str });
+        }
+
+        if (task.completed_at) |c| {
+            const completed_str = try std.fmt.allocPrint(allocator, "{d}", .{c});
+            try fields.append(allocator, .{ .label = "Completed", .value = completed_str });
+        }
+
+        output.render_detail(fields.items);
     }
 };
 
