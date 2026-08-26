@@ -345,6 +345,10 @@ pub const TaskArgs = struct {
         \\      --desc=<description>  New description
         \\  delete
         \\      --id=<id>             Task ID to delete
+        \\  complete
+        \\      --id=<id>             Task ID to complete
+        \\  start
+        \\      --id=<id>             Task ID to start
         \\  show
         \\      --id=<id>             Show task details
         \\Examples:
