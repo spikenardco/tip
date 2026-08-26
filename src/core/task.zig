@@ -1,5 +1,6 @@
 const std = @import("std");
 const models = @import("models.zig");
+const ansi = @import("../utils/ansi.zig");
 const generate = @import("../utils/generate.zig");
 const output = @import("../utils/output.zig");
 const zqlite = @import("zqlite");
@@ -7,41 +8,6 @@ const migrate = @import("../internal/database/migrate.zig");
 
 fn now_seconds(io: std.Io) i64 {
     return std.Io.Timestamp.now(io, .real).toSeconds();
-}
-
-fn status_icon(status: models.Task.Status) []const u8 {
-    return switch (status) {
-        .pending => "○",
-        .in_progress => "⟳",
-        .completed => "✓",
-    };
-}
-
-fn status_label(status: models.Task.Status) []const u8 {
-    return switch (status) {
-        .pending => "Pending",
-        .in_progress => "In Progress",
-        .completed => "Completed",
-    };
-}
-
-fn priority_glyph(priority: ?models.Task.Priority) []const u8 {
-    if (priority) |p| {
-        return switch (p) {
-            .high => "↑",
-            .medium => "-",
-            .low => "↓",
-        };
-    }
-    return "";
-}
-
-fn priority_label(priority: models.Task.Priority) []const u8 {
-    return switch (priority) {
-        .high => "High",
-        .medium => "Medium",
-        .low => "Low",
-    };
 }
 
 const AddFields = struct {
@@ -235,9 +201,9 @@ pub const Tasks = struct {
         defer rows.deinit(allocator);
 
         for (tasks) |t| {
-            const status_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ status_icon(t.status), status_label(t.status) });
+            const status_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ ansi.status_icon(t.status), ansi.status_label(t.status) });
             const priority_str = if (t.priority) |p|
-                try std.fmt.allocPrint(allocator, "{s} {s}", .{ priority_glyph(p), priority_label(p) })
+                try std.fmt.allocPrint(allocator, "{s} {s}", .{ ansi.priority_glyph(p), ansi.priority_label(p) })
             else
                 "";
             const created_str = try std.fmt.allocPrint(allocator, "{d}", .{t.created_at});
@@ -268,11 +234,11 @@ pub const Tasks = struct {
             try fields.append(allocator, .{ .label = "Description", .value = d });
         }
 
-        const status_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ status_icon(task.status), status_label(task.status) });
+        const status_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ ansi.status_icon(task.status), ansi.status_label(task.status) });
         try fields.append(allocator, .{ .label = "Status", .value = status_str });
 
         if (task.priority) |p| {
-            const priority_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ priority_glyph(p), priority_label(p) });
+            const priority_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ ansi.priority_glyph(p), ansi.priority_label(p) });
             try fields.append(allocator, .{ .label = "Priority", .value = priority_str });
         }
 
