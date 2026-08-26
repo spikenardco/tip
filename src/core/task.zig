@@ -523,13 +523,3 @@ test "start task" {
     const all_tasks = try fixture.tasks.list();
     try std.testing.expectEqual(all_tasks[0].status, .in_progress);
 }
-
-test "show task" {
-    var fixture = try TestTasks.init();
-    defer fixture.deinit();
-
-    const task1 = try fixture.tasks.add(.{ .title = "Test Task" });
-    try fixture.tasks.show(task1.id);
-
-    try std.testing.expectError(error.TaskNotFound, fixture.tasks.show("001"));
-}

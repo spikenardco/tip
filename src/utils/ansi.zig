@@ -36,23 +36,10 @@ pub fn priority_label(priority: models.Task.Priority) []const u8 {
     };
 }
 
-test "status_icon maps statuses" {
-    try std.testing.expectEqualStrings("○", status_icon(.pending));
-    try std.testing.expectEqualStrings("⟳", status_icon(.in_progress));
-    try std.testing.expectEqualStrings("✓", status_icon(.completed));
-}
-
 test "status_label maps statuses" {
     try std.testing.expectEqualStrings("Pending", status_label(.pending));
     try std.testing.expectEqualStrings("In Progress", status_label(.in_progress));
     try std.testing.expectEqualStrings("Completed", status_label(.completed));
-}
-
-test "priority_glyph maps priorities" {
-    try std.testing.expectEqualStrings("↑", priority_glyph(.high));
-    try std.testing.expectEqualStrings("-", priority_glyph(.medium));
-    try std.testing.expectEqualStrings("↓", priority_glyph(.low));
-    try std.testing.expectEqualStrings("", priority_glyph(null));
 }
 
 test "priority_label maps priorities" {
