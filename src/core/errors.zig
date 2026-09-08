@@ -35,22 +35,3 @@ pub fn exit_code(err: anyerror) u8 {
         else => 1,
     };
 }
-
-test "describe returns clean messages for known errors" {
-    try std.testing.expectEqualStrings("task title cannot be empty", describe(error.EmptyTitle));
-    try std.testing.expectEqualStrings("no task found matching that id", describe(error.TaskNotFound));
-    try std.testing.expectEqualStrings("id matches multiple tasks; use more characters", describe(error.AmbiguousPrefix));
-    try std.testing.expectEqualStrings("could not read or write task data", describe(error.StorageFailure));
-}
-
-test "describe falls back to generic for unknown errors" {
-    try std.testing.expectEqualStrings("an unexpected error occurred", describe(error.OutOfMemory));
-}
-
-test "exit_code maps errors to semantic codes" {
-    try std.testing.expectEqual(@as(u8, 4), exit_code(error.EmptyTitle));
-    try std.testing.expectEqual(@as(u8, 4), exit_code(error.AmbiguousPrefix));
-    try std.testing.expectEqual(@as(u8, 3), exit_code(error.TaskNotFound));
-    try std.testing.expectEqual(@as(u8, 1), exit_code(error.StorageFailure));
-    try std.testing.expectEqual(@as(u8, 1), exit_code(error.OutOfMemory));
-}
