@@ -33,12 +33,16 @@ pub fn build(b: *std.Build) void {
         },
     }).module("zqlite");
 
-    const manifest = std.zon.parse.fromSliceAlloc(
+    var diagnostics: std.zon.parse.Diagnostics = undefined;
+    const manifest = std.zon.parse.fromSlice(
         struct { version: []const u8 },
-        b.allocator,
-        @embedFile("build.zig.zon"),
-        null,
-        .{ .ignore_unknown_fields = true },
+        .{
+            .gpa = b.allocator,
+            .arena = b.allocator,
+            .source = @embedFile("build.zig.zon"),
+            .diagnostics = &diagnostics,
+            .ignore_unknown_fields = true,
+        },
     ) catch @panic("bad zon");
 
     const version_options = b.addOptions();
@@ -62,12 +66,12 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    exe.root_module.strip = optimize != .Debug;
+    exe.root_module.strip = optimize != .debug;
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_cmd.addArgs(args);
+    run_cmd.addPassthruArgs();
     b.step("run", "Run the app").dependOn(&run_cmd.step);
 
     const all_tests = b.addTest(.{
