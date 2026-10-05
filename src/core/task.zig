@@ -6,6 +6,89 @@ const output = @import("../utils/output.zig");
 const zqlite = @import("zqlite");
 const migrate = @import("../internal/database/migrate.zig");
 
+pub const TaskArgs = struct {
+    list: bool = false,
+    subcommand: ?union(enum) {
+        add: struct {
+            title: []const u8,
+            desc: ?[]const u8 = null,
+        },
+        edit: struct {
+            id: []const u8,
+            title: []const u8,
+            desc: ?[]const u8 = null,
+        },
+        delete: struct {
+            id: []const u8,
+        },
+        complete: struct {
+            id: []const u8,
+        },
+        start: struct {
+            id: []const u8,
+        },
+        show: struct {
+            id: []const u8,
+        },
+    } = null,
+
+    pub const help =
+        \\Usage:
+        \\  tip task <subcommand> [args] [flags]
+        \\
+        \\Options:
+        \\  --list                    List all tasks
+        \\
+        \\Commands:
+        \\  add
+        \\      --title=<title>       Add a new task
+        \\      --desc=<description>  Task description
+        \\  edit
+        \\      --id=<id>             Task ID to edit
+        \\      --title=<title>       New title
+        \\      --desc=<description>  New description
+        \\  delete
+        \\      --id=<id>             Task ID to delete
+        \\  complete
+        \\      --id=<id>             Task ID to complete
+        \\  start
+        \\      --id=<id>             Task ID to start
+        \\  show
+        \\      --id=<id>             Show task details
+        \\Examples:
+        \\  tip task --list
+        \\  tip task add --title="Review code"
+        \\
+    ;
+};
+
+pub fn dispatch(tasks: Tasks, args: TaskArgs) !void {
+    if (args.list) {
+        const items = try tasks.list();
+        return tasks.print_task_list(items);
+    }
+
+    if (args.subcommand) |subcommand| {
+        switch (subcommand) {
+            .add => |fields| _ = try tasks.add(.{
+                .title = fields.title,
+                .description = fields.desc orelse null,
+            }),
+            .edit => |fields| try tasks.edit(fields.id, .{
+                .title = fields.title,
+                .description = fields.desc orelse null,
+            }),
+            .delete => |fields| try tasks.delete(fields.id),
+            .complete => |fields| try tasks.complete(fields.id),
+            .start => |fields| try tasks.start(fields.id),
+            .show => |fields| try tasks.show(fields.id),
+        }
+        return;
+    }
+
+    std.debug.print("{s}\n", .{TaskArgs.help});
+}
+
 fn now_seconds(io: std.Io) i64 {
     return std.Io.Timestamp.now(io, .real).toSeconds();
 }
@@ -267,89 +350,6 @@ pub const Tasks = struct {
         output.render_detail(fields.items);
     }
 };
-
-pub const TaskArgs = struct {
-    list: bool = false,
-    subcommand: ?union(enum) {
-        add: struct {
-            title: []const u8,
-            desc: ?[]const u8 = null,
-        },
-        edit: struct {
-            id: []const u8,
-            title: []const u8,
-            desc: ?[]const u8 = null,
-        },
-        delete: struct {
-            id: []const u8,
-        },
-        complete: struct {
-            id: []const u8,
-        },
-        start: struct {
-            id: []const u8,
-        },
-        show: struct {
-            id: []const u8,
-        },
-    } = null,
-
-    pub const help =
-        \\Usage:
-        \\  tip task <subcommand> [args] [flags]
-        \\
-        \\Options:
-        \\  --list                    List all tasks
-        \\
-        \\Commands:
-        \\  add
-        \\      --title=<title>       Add a new task
-        \\      --desc=<description>  Task description
-        \\  edit
-        \\      --id=<id>             Task ID to edit
-        \\      --title=<title>       New title
-        \\      --desc=<description>  New description
-        \\  delete
-        \\      --id=<id>             Task ID to delete
-        \\  complete
-        \\      --id=<id>             Task ID to complete
-        \\  start
-        \\      --id=<id>             Task ID to start
-        \\  show
-        \\      --id=<id>             Show task details
-        \\Examples:
-        \\  tip task --list
-        \\  tip task add --title="Review code"
-        \\
-    ;
-};
-
-pub fn dispatch(tasks: Tasks, args: TaskArgs) !void {
-    if (args.list) {
-        const items = try tasks.list();
-        return tasks.print_task_list(items);
-    }
-
-    if (args.subcommand) |subcommand| {
-        switch (subcommand) {
-            .add => |fields| _ = try tasks.add(.{
-                .title = fields.title,
-                .description = fields.desc orelse null,
-            }),
-            .edit => |fields| try tasks.edit(fields.id, .{
-                .title = fields.title,
-                .description = fields.desc orelse null,
-            }),
-            .delete => |fields| try tasks.delete(fields.id),
-            .complete => |fields| try tasks.complete(fields.id),
-            .start => |fields| try tasks.start(fields.id),
-            .show => |fields| try tasks.show(fields.id),
-        }
-        return;
-    }
-
-    std.debug.print("{s}\n", .{TaskArgs.help});
-}
 
 // ============== Tests ==============
 
