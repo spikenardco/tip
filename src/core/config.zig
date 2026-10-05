@@ -92,7 +92,7 @@ pub const ConfigStore = struct {
     config_path: ?[]const u8,
 
     /// Load config from file, falling back to defaults when no file exists.
-    /// The returned `Config` owns its allocations; free with `zon.parse.free`.
+    /// Parsed strings are backed by the store allocator.
     pub fn load(self: ConfigStore) !Config {
         const path = try self.resolve_path();
         defer self.allocator.free(path);
@@ -113,10 +113,14 @@ pub const ConfigStore = struct {
         const content = try file.readStreaming(self.io, &.{buf});
         const sentineled = buf[0..content :0];
 
-        var diag: std.zon.parse.Diagnostics = .{};
-        defer diag.deinit(self.allocator);
+        var diag: std.zon.parse.Diagnostics = undefined;
 
-        return std.zon.parse.fromSliceAlloc(Config, self.allocator, sentineled, &diag, .{ .free_on_error = true });
+        return std.zon.parse.fromSlice(Config, .{
+            .gpa = self.allocator,
+            .arena = self.allocator,
+            .source = sentineled,
+            .diagnostics = &diag,
+        });
     }
 
     /// Serialize config to ZON and write it atomically (temp file + rename),
@@ -164,10 +168,9 @@ pub const ConfigStore = struct {
     }
 
     /// Set a config value, persist to file, and return the updated config.
-    /// The returned `Config` owns its allocations; free with `zon.parse.free`.
+    /// Parsed strings are backed by the store allocator.
     pub fn set(self: ConfigStore, key: []const u8, value: []const u8) !Config {
         var config = try self.load();
-        errdefer std.zon.parse.free(self.allocator, config);
 
         if (std.mem.eql(u8, key, "verbose")) {
             config.verbose = std.mem.eql(u8, value, "true");

@@ -2,15 +2,15 @@
     .name = .tip,
     .version = "0.2.0",
     .fingerprint = 0x4883b84ca584213a, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .flags = .{
-            .url = "git+https://github.com/spikenardco/flags.zig#d59be9f6f188a26e8af6959ce8c05e305458686b",
-            .hash = "flags-0.2.1-GjWK4inSAADhRL56XvkAh12bCDB_DDNHVAHVk2usi1nb",
+            .url = "git+https://github.com/spikenardco/flags.zig#56a2cf707d4ea941b42a69fba8c5dede14a6ae87",
+            .hash = "flags-0.3.0-GjWK4rraAADj0jpK-BNnr8NK42-MZgSybLM2UT91EZK2",
         },
         .zqlite = .{
-            .url = "git+https://github.com/karlseguin/zqlite.zig#a9c1cd3657315306856ddf4a8a28a11b10fd5a9d",
-            .hash = "zqlite-0.0.1-RWLaYyc7nABTzVzEpEMPi3qD8xJHi0a2ycNgL73XyEdt",
+            .url = "git+https://github.com/karlseguin/zqlite.zig#865223b734a5113f731ab1eb1d7d81c8ac252913",
+            .hash = "zqlite-0.0.1-RWLaY4Y8nADz2l5aBE-JVyDyM3sZzHjq0agNykuVZKqQ",
         },
     },
     .paths = .{
