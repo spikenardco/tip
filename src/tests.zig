@@ -5,4 +5,5 @@ test {
     _ = @import("utils/generate.zig");
     _ = @import("utils/output.zig");
     _ = @import("core/errors.zig");
+    _ = @import("core/config.zig");
 }

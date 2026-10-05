@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// User-input problems. Rendered as clean one-line messages.
-pub const ValidationError = error{EmptyTitle};
+pub const ValidationError = error{ EmptyTitle, UnknownConfigKey, ConfigAlreadyExists, ConfigTooLarge, ParseZon };
 
 /// Task-domain outcomes the user can act on.
 pub const TaskError = error{ TaskNotFound, AmbiguousPrefix };
@@ -20,6 +20,10 @@ pub fn describe(err: anyerror) []const u8 {
         error.TaskNotFound => "no task found matching that id",
         error.AmbiguousPrefix => "id matches multiple tasks; use more characters",
         error.StorageFailure => "could not read or write task data",
+        error.UnknownConfigKey => "unknown config key",
+        error.ConfigAlreadyExists => "config file already exists",
+        error.ConfigTooLarge => "config file too large",
+        error.ParseZon => "invalid config file",
         else => "an unexpected error occurred",
     };
 }
@@ -32,6 +36,7 @@ pub fn exit_code(err: anyerror) u8 {
         error.EmptyTitle, error.AmbiguousPrefix => 4,
         error.TaskNotFound => 3,
         error.StorageFailure => 1,
+        error.UnknownConfigKey, error.ConfigAlreadyExists, error.ConfigTooLarge, error.ParseZon => 4,
         else => 1,
     };
 }
